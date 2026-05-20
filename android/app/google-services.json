@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "20078393900",
+    "project_id": "eros-dateapp",
+    "storage_bucket": "eros-dateapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:20078393900:android:4bb007948196b5c6d16f89",
+        "android_client_info": {
+          "package_name": "com.piyasa.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA38RsiDXawUi8JjiEpvSIN0BdiJ_ZbMbw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

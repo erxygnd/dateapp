@@ -1,0 +1,158 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function requestParticipant(data) {
+      return signedIn() &&
+        (data.postOwnerId == uid() || data.interestedUserId == uid());
+    }
+
+    function chatParticipant(data) {
+      return signedIn() &&
+        data.participants is list &&
+        uid() in data.participants;
+    }
+
+    function existingChatParticipant(chatId) {
+      return signedIn() &&
+        uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() &&
+        (userId == uid() || resource.data.email == request.auth.token.email);
+      allow create, update, delete: if signedIn() && userId == uid();
+    }
+
+    match /usernames/{username} {
+      allow get: if true;
+      allow list: if false;
+
+      allow create: if signedIn() &&
+        request.resource.data.uid == uid() &&
+        request.resource.data.usernameLower == username &&
+        request.resource.data.email == request.auth.token.email &&
+        !exists(/databases/$(database)/documents/usernames/$(username));
+
+      allow delete: if signedIn() && resource.data.uid == uid();
+      allow update: if false;
+    }
+
+    match /encounters/{encounterId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn() &&
+        request.resource.data.ownerId == uid() &&
+        request.resource.data.place is string &&
+        request.resource.data.description is string &&
+        request.resource.data.location is latlng;
+
+      allow update: if signedIn() && (
+        (
+          resource.data.ownerId == uid() &&
+          request.resource.data.ownerId == resource.data.ownerId
+        ) ||
+        (
+          changedOnly(['requestCount']) &&
+          request.resource.data.requestCount is int &&
+          resource.data.requestCount is int &&
+          request.resource.data.requestCount == resource.data.requestCount + 1
+        )
+      );
+
+      allow delete: if signedIn() && resource.data.ownerId == uid();
+    }
+
+    match /interest_requests/{requestId} {
+      allow read: if requestParticipant(resource.data);
+
+      allow create: if signedIn() &&
+        request.resource.data.interestedUserId == uid() &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.chatId == null;
+
+      allow update: if signedIn() && (
+        (
+          resource.data.postOwnerId == uid() &&
+          request.resource.data.postOwnerId == resource.data.postOwnerId &&
+          request.resource.data.interestedUserId == resource.data.interestedUserId &&
+          changedOnly(['status', 'chatId', 'decidedAt']) &&
+          request.resource.data.status in ['accepted', 'rejected']
+        ) ||
+        (
+          resource.data.interestedUserId == uid() &&
+          request.resource.data.interestedUserId == uid() &&
+          request.resource.data.postOwnerId == resource.data.postOwnerId &&
+          request.resource.data.postId == resource.data.postId &&
+          request.resource.data.status == 'pending' &&
+          request.resource.data.chatId == null
+        )
+      );
+
+      allow delete: if requestParticipant(resource.data);
+    }
+
+    match /chats/{chatId} {
+      allow read: if chatParticipant(resource.data);
+
+      allow create: if chatParticipant(request.resource.data) &&
+        request.resource.data.participants.size() == 2 &&
+        request.resource.data.blockedBy is list;
+
+      allow update: if chatParticipant(resource.data) &&
+        request.resource.data.participants == resource.data.participants &&
+        changedOnly([
+          'lastMessage',
+          'lastMessageAt',
+          'blockedBy',
+          'blockedAt',
+          'participantNames',
+          'deletedParticipants'
+        ]);
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if existingChatParticipant(chatId);
+
+        allow create: if existingChatParticipant(chatId) &&
+          request.resource.data.senderId == uid() &&
+          request.resource.data.type in ['text', 'image', 'voice'];
+
+        allow update: if false;
+
+        allow delete: if existingChatParticipant(chatId) &&
+          resource.data.senderId == uid();
+      }
+    }
+
+    match /blocks/{blockId} {
+      allow create, update: if signedIn() &&
+        request.resource.data.blockerId == uid() &&
+        request.resource.data.blockedUserId is string;
+
+      allow read, delete: if signedIn() && resource.data.blockerId == uid();
+    }
+
+    match /reports/{reportId} {
+      allow create: if signedIn() &&
+        request.resource.data.reporterId == uid() &&
+        request.resource.data.reason is string;
+
+      allow read, delete: if signedIn() && resource.data.reporterId == uid();
+      allow update: if false;
+    }
+  }
+}
