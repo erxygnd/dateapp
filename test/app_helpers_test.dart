@@ -71,14 +71,14 @@ void main() {
       );
     });
 
-    test('non-Ankara users keep the default radius choices', () {
+    test('non-Ankara users do not get pilot radius choices', () {
       expect(
         isLocationInAnkara(latitude: 41.0082, longitude: 28.9784),
         isFalse,
       );
       expect(
         radiusOptionsForLocation(latitude: 41.0082, longitude: 28.9784),
-        defaultRadiusOptionsKm,
+        isEmpty,
       );
     });
   });

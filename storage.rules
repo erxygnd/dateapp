@@ -3,6 +3,8 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     match /{allPaths=**} {
+      // Su an Storage kullanmiyoruz; fotograflar Firestore'da dataUrl olarak saklaniyor.
+      // Bu yuzden Storage'i komple kapali tutmak en guvenli secenek.
       allow read, write: if false;
     }
   }

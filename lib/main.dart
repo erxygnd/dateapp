@@ -24,10 +24,12 @@ import 'utils/chat_utils.dart';
 import 'utils/location_rules.dart';
 
 Future<void> main() async {
+  // Flutter tarafini hazirlamadan Firebase gibi native servisleri baslatamayiz.
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   if (kIsWeb) {
+    // Web'de sayfa yenilense bile kullanici oturumu tarayicida kalsin.
     await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
   }
 
@@ -228,26 +230,32 @@ class GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final panel = Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: color ?? AppColors.card,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1F14532D),
+            blurRadius: 20,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: child,
+    );
+
+    if (!enableExpensiveGlassBlur) {
+      return panel;
+    }
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: color ?? AppColors.card,
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(color: AppColors.border),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x1F14532D),
-                blurRadius: 30,
-                offset: Offset(0, 14),
-              ),
-            ],
-          ),
-          child: child,
-        ),
+        filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: panel,
       ),
     );
   }
@@ -259,6 +267,8 @@ class AuthGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
+      // FirebaseAuth burada uygulamanin kapicisi gibi calisir:
+      // kullanici giris yaptiysa ana sayfa, yapmadiysa login ekrani acilir.
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -291,6 +301,7 @@ class LoadingPage extends StatelessWidget {
 }
 
 Future<Position> getCurrentPositionSafely() async {
+  // Once telefonun konum servisi acik mi bakiyoruz. Kapaliysa izin istemek yetmez.
   final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
   if (!serviceEnabled) {
@@ -300,6 +311,7 @@ Future<Position> getCurrentPositionSafely() async {
   LocationPermission permission = await Geolocator.checkPermission();
 
   if (permission == LocationPermission.denied) {
+    // Kullanici daha once karar vermediyse burada ilk kez izin penceresi acilir.
     permission = await Geolocator.requestPermission();
   }
 
@@ -319,6 +331,7 @@ Future<Position> getCurrentPositionSafely() async {
 }
 
 String friendlyAuthError(FirebaseAuthException e) {
+  // Firebase hata kodlari teknik gelir. Bu fonksiyon onlari insanca mesaja cevirir.
   switch (e.code) {
     case "invalid-email":
       return "E-posta formatı hatalı.";
@@ -428,6 +441,7 @@ String formatBirthDate(DateTime birthDate) {
 }
 
 String normalizeUsername(String value) {
+  // Eray, eray ve ERAY ayni kullanici adi sayilsin diye hepsini kuculturuz.
   return value.trim().toLowerCase();
 }
 
@@ -441,6 +455,8 @@ final Map<String, Uint8List?> embeddedProfilePhotoBytesCache = {};
 Future<List<String>> prepareProfilePhotoSources({
   required List<LocalProfilePhoto> photos,
 }) async {
+  // Su an fotograflari Storage'a yuklemek yerine base64 metin olarak sakliyoruz.
+  // Yani resim aslinda uzun bir yaziya cevrilip Firestore alanina konuyor.
   return photos.map((photo) => photo.toDataUrl()).toList();
 }
 
@@ -450,6 +466,7 @@ bool isEmbeddedProfilePhoto(String source) {
 
 Uint8List? embeddedProfilePhotoBytes(String source) {
   if (embeddedProfilePhotoBytesCache.containsKey(source)) {
+    // Ayni fotografi tekrar tekrar decode etmek telefonu yorar; once cache'e bakiyoruz.
     return embeddedProfilePhotoBytesCache[source];
   }
 
@@ -472,6 +489,7 @@ Widget buildSavedProfilePhotoImage(String source) {
   final cachedProvider = profilePhotoImageProviderCache[source];
 
   if (cachedProvider != null) {
+    // Resim provider'i daha once hazirlandiysa tekrar hazirlamiyoruz.
     return Image(
       image: cachedProvider,
       fit: BoxFit.cover,
@@ -533,6 +551,7 @@ Future<LocalProfilePhoto?> pickAndCropProfilePhoto({
   }
 
   return LocalProfilePhoto(
+    // Crop ekranindan gelen temizlenmis kare fotograf artik profile kaydedilebilir.
     bytes: croppedBytes,
     fileName: "profile_${DateTime.now().millisecondsSinceEpoch}.png",
     contentType: "image/png",
@@ -963,6 +982,8 @@ class _LoginPageState extends State<LoginPage> {
       var email = loginId;
 
       if (!loginId.contains("@")) {
+        // Kullanici e-posta yerine kullanici adi yazarsa once onun e-postasini buluyoruz.
+        // Firebase Auth sadece e-posta+sifre ile giris yaptigi icin bu ara tablo gerekli.
         final usernameDoc = await FirebaseFirestore.instance
             .collection("usernames")
             .doc(normalizeUsername(loginId))
@@ -986,6 +1007,7 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       await FirebaseAuth.instance.signInWithEmailAndPassword(
+        // Burasi asil giris noktasi: Firebase e-posta ve sifreyi dogrular.
         email: email,
         password: passwordController.text.trim(),
       );
@@ -1242,6 +1264,8 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> register() async {
+    // Kayit icin once ekrandaki kurallari kontrol ediyoruz.
+    // Bunlardan biri eksikse Firebase'e hic gitmeden kullaniciyi durduruyoruz.
     if (!formKey.currentState!.validate()) {
       return;
     }
@@ -1289,18 +1313,22 @@ class _RegisterPageState extends State<RegisterPage> {
       }
 
       if (existingUsername.exists) {
+        // Ayni kullanici adini iki kisinin almasini engelleyen ilk kontrol.
         showMessage("Bu kullanıcı adı alınmış.");
         return;
       }
 
       final credential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
+            // Once Firebase Auth hesabi acilir. UID burada olusur.
             email: emailController.text.trim(),
             password: passwordController.text.trim(),
           );
 
       final user = credential.user!;
       try {
+        // Sonra kullanici adi ayri bir belgeye yazilir.
+        // Boylece login ekraninda "kullanici adi -> e-posta" aramasi yapabiliriz.
         await usernameRef.set({
           "uid": user.uid,
           "username": username,
@@ -1309,6 +1337,7 @@ class _RegisterPageState extends State<RegisterPage> {
           "createdAt": FieldValue.serverTimestamp(),
         });
       } on FirebaseException {
+        // Burada hata olursa Auth hesabi bos bos kalmasin diye yeni acilan hesabi siliyoruz.
         await user.delete();
         showMessage("Bu kullanici adi az once alindi. Baska bir ad dene.");
         return;
@@ -1319,6 +1348,8 @@ class _RegisterPageState extends State<RegisterPage> {
       );
 
       unawaited(
+        // DisplayName sadece Firebase Auth profilindeki kisa isimdir.
+        // Basarisiz olursa ana profil kaydini bozmasin diye beklemeden devam ediyoruz.
         user
             .updateDisplayName(displayNameController.text.trim())
             .timeout(profileSaveTimeout)
@@ -1329,6 +1360,7 @@ class _RegisterPageState extends State<RegisterPage> {
           .collection("users")
           .doc(user.uid)
           .set({
+            // Uygulamada asil kullanilan profil bilgisi Firestore'daki users/{uid} belgesidir.
             "uid": user.uid,
             "username": username,
             "usernameLower": usernameLower,
@@ -1343,13 +1375,19 @@ class _RegisterPageState extends State<RegisterPage> {
             "photoUrls": photoUrls,
             "photoUploadPending": false,
             "premium": PremiumAccess.defaultUserState(),
+            "tutorialCompleted": false,
+            "dismissedEncounterIds": [],
             "createdAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp(),
           })
           .timeout(profileSaveTimeout);
 
       if (mounted) {
-        Navigator.pop(context);
+        // Kayit biter bitmez kullaniciyi uygulamayi anlatan ilk tur ekrana aliyoruz.
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AppTutorialPage()),
+          (route) => false,
+        );
       }
     } on FirebaseAuthException catch (e) {
       showMessage(friendlyAuthError(e));
@@ -1894,6 +1932,306 @@ class WelcomePage extends StatelessWidget {
   }
 }
 
+class AppTutorialPage extends StatefulWidget {
+  const AppTutorialPage({super.key});
+
+  @override
+  State<AppTutorialPage> createState() => _AppTutorialPageState();
+}
+
+class _TutorialStepData {
+  final IconData icon;
+  final String title;
+  final String body;
+  final List<String> bullets;
+
+  const _TutorialStepData({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.bullets,
+  });
+}
+
+class _AppTutorialPageState extends State<AppTutorialPage> {
+  final PageController controller = PageController();
+  int stepIndex = 0;
+  bool isFinishing = false;
+
+  static const List<_TutorialStepData> steps = [
+    _TutorialStepData(
+      icon: Icons.swipe_outlined,
+      title: "İtirafları kart kart gör",
+      body:
+          "Yakınımdaki İtiraflar ekranında artık uzun liste yok. Karşına tek bir itiraf kutucuğu gelir.",
+      bullets: [
+        "Kutuda yer, zaman, kişi tarifi, not ve mesafe görünür.",
+        "Okuduktan sonra kartı sağa veya sola kaydırırsın.",
+      ],
+    ),
+    _TutorialStepData(
+      icon: Icons.favorite_outline,
+      title: "Sağa kaydırırsan istek gider",
+      body:
+          "Bu kişi ben olabilirim diyorsan kartı sağa kaydır. Uygulama ilanı bırakan kişiye istek gönderir.",
+      bullets: [
+        "İstek beklemede kalır.",
+        "İlan sahibi seni Gelen İstekler ekranında görür.",
+      ],
+    ),
+    _TutorialStepData(
+      icon: Icons.style_outlined,
+      title: "Gelen istekler de adım adım",
+      body:
+          "Sen ilan bıraktığında biri sağa kaydırırsa sana istek gelir. Burada karar yine basit.",
+      bullets: [
+        "Sağa kaydırırsan kabul edersin.",
+        "Sola kaydırırsan reddedersin.",
+      ],
+    ),
+    _TutorialStepData(
+      icon: Icons.chat_bubble_outline,
+      title: "İki taraf onaylarsa sohbet açılır",
+      body:
+          "Sohbet sadece karşılıklı onaydan sonra başlar. İlk dakikalarda fotoğraf kilidi vardır.",
+      bullets: [
+        "Mesaj ve ses kaydı gönderebilirsin.",
+        "Rahatsız olursan raporla veya engelle.",
+      ],
+    ),
+  ];
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> finishTutorial() async {
+    if (isFinishing) {
+      return;
+    }
+
+    setState(() {
+      isFinishing = true;
+    });
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user != null) {
+      await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
+        "tutorialCompleted": true,
+        "updatedAt": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const WelcomePage()),
+      (route) => false,
+    );
+  }
+
+  void nextStep() {
+    if (stepIndex == steps.length - 1) {
+      unawaited(finishTutorial());
+      return;
+    }
+
+    controller.nextPage(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Widget buildStep(_TutorialStepData step, int index) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: GlassPanel(
+        radius: 28,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: AppColors.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: AppColors.accent.withValues(alpha: 0.24),
+                ),
+              ),
+              child: Icon(step.icon, color: AppColors.accent, size: 30),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              "Adım ${index + 1}",
+              style: const TextStyle(
+                color: AppColors.secondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              step.title,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+                height: 1.08,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              step.body,
+              style: const TextStyle(
+                color: AppColors.softText,
+                fontSize: 15,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 22),
+            ...step.bullets.map(
+              (bullet) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.check_circle,
+                      color: AppColors.accent,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        bullet,
+                        style: const TextStyle(
+                          color: AppColors.text,
+                          fontSize: 14,
+                          height: 1.35,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget buildDots() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(steps.length, (index) {
+        final selected = index == stepIndex;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: selected ? 26 : 8,
+          height: 8,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.accent : AppColors.border,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        );
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: AppBackdrop(
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 18, 24, 10),
+                child: Row(
+                  children: [
+                    appLogo(size: 48),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        "Piyasa'yı hızlıca tanıyalım",
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: isFinishing
+                          ? null
+                          : () {
+                              unawaited(finishTutorial());
+                            },
+                      child: const Text("Geç"),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: PageView.builder(
+                  controller: controller,
+                  itemCount: steps.length,
+                  onPageChanged: (value) {
+                    setState(() {
+                      stepIndex = value;
+                    });
+                  },
+                  itemBuilder: (context, index) => Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      child: buildStep(steps[index], index),
+                    ),
+                  ),
+                ),
+              ),
+              buildDots(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    onPressed: isFinishing ? null : nextStep,
+                    icon: Icon(
+                      stepIndex == steps.length - 1
+                          ? Icons.check
+                          : Icons.arrow_forward,
+                    ),
+                    label: Text(
+                      stepIndex == steps.length - 1 ? "Başla" : "Sonraki adım",
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RoundIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onPressed;
@@ -1903,16 +2241,13 @@ class _RoundIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipOval(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: IconButton(
-          onPressed: onPressed,
-          icon: Icon(icon),
-          color: AppColors.text,
-          style: IconButton.styleFrom(
-            backgroundColor: AppColors.cardSolid,
-            side: const BorderSide(color: AppColors.border),
-          ),
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon),
+        color: AppColors.text,
+        style: IconButton.styleFrom(
+          backgroundColor: AppColors.cardSolid,
+          side: const BorderSide(color: AppColors.border),
         ),
       ),
     );
@@ -1953,6 +2288,130 @@ class _MetricChip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EmptyEncounterSearch extends StatefulWidget {
+  final Widget radiusSelector;
+
+  const _EmptyEncounterSearch({required this.radiusSelector});
+
+  @override
+  State<_EmptyEncounterSearch> createState() => _EmptyEncounterSearchState();
+}
+
+class _EmptyEncounterSearchState extends State<_EmptyEncounterSearch>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController pulseController;
+  bool showRadiusSelector = false;
+
+  @override
+  void initState() {
+    super.initState();
+    pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          showRadiusSelector = true;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    pulseController.dispose();
+    super.dispose();
+  }
+
+  Widget buildPulseRing(double delay) {
+    return AnimatedBuilder(
+      animation: pulseController,
+      builder: (context, child) {
+        final rawProgress = (pulseController.value + delay) % 1;
+        final opacity = (1 - rawProgress) * 0.28;
+
+        return Opacity(
+          opacity: opacity,
+          child: Transform.scale(
+            scale: 0.78 + rawProgress * 2.15,
+            child: Container(
+              width: 118,
+              height: 118,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppColors.accent.withValues(alpha: 0.55),
+                  width: 2,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 260,
+              height: 260,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  buildPulseRing(0),
+                  buildPulseRing(0.18),
+                  buildPulseRing(0.36),
+                  appLogo(size: 118),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              "Şimdilik kaydıracak yeni itiraf yok.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 21,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Gösterilecek mesafeyi artırınca keşif alanı genişler. Yeni itiraf geldiğinde burada sıradaki kart olarak görünür.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.softText,
+                fontSize: 14,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 18),
+            AnimatedSlide(
+              offset: showRadiusSelector ? Offset.zero : const Offset(0, -0.28),
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutCubic,
+              child: AnimatedOpacity(
+                opacity: showRadiusSelector ? 1 : 0,
+                duration: const Duration(milliseconds: 260),
+                child: widget.radiusSelector,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2495,6 +2954,7 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
 
+    // Ekran acilinca Firestore'daki profil bilgisini forma dolduruyoruz.
     final profile = await loadUserProfile(user);
 
     if (!mounted) {
@@ -2540,6 +3000,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     try {
       unawaited(
+        // Auth profilindeki gorunen adi da guncelliyoruz ama asil kaynak Firestore.
         user
             .updateDisplayName(nameController.text.trim())
             .timeout(profileSaveTimeout)
@@ -2548,6 +3009,7 @@ class _ProfilePageState extends State<ProfilePage> {
       final uploadedUrls = await prepareProfilePhotoSources(photos: newPhotos);
       final updatedPhotoUrls = [...photoUrls, ...uploadedUrls];
 
+      // merge:true sadece verdigimiz alanlari degistirir, eski alanlari silmez.
       await FirebaseFirestore.instance
           .collection("users")
           .doc(user.uid)
@@ -2623,6 +3085,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> deleteAccount() async {
+    // Hesap silme geri alinmaz. Bu yuzden once onay, sonra sifre istiyoruz.
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -2665,7 +3128,9 @@ class _ProfilePageState extends State<ProfilePage> {
     });
 
     try {
+      // Firebase guvenlik icin "bu kisi gercekten hesabinin sahibi mi" diye tekrar sifre ister.
       await accountDeletionService.reauthenticateWithPassword(password);
+      // Sifre dogruysa uygulamadaki ilgili verileri ve son olarak Auth hesabini sileriz.
       await accountDeletionService.deleteCurrentAccount();
 
       if (!mounted) {
@@ -2888,6 +3353,8 @@ class IncomingRequestsPage extends StatelessWidget {
     }
 
     if (!accepted) {
+      // Sola atma/reddetme: istegi silmiyoruz, durumunu rejected yapiyoruz.
+      // Boylece ileride "bu istek ne oldu" sorusunun cevabi veride kalir.
       await requestDoc.reference.update({
         "status": "rejected",
         "decidedAt": FieldValue.serverTimestamp(),
@@ -2902,12 +3369,14 @@ class IncomingRequestsPage extends StatelessWidget {
     }
 
     final ownerProfile = await loadUserProfile(user);
+    // Iki kullanici icin hep ayni chatId uretilir. Siralama bu yuzden onemli.
     final chatId = buildChatId(user.uid, requesterId);
     final chatOpenedAt = DateTime.now();
     final requesterName =
         (data["requesterName"] ?? data["interestedUserName"] ?? "Kullanıcı")
             .toString();
 
+    // Kabul edilince sohbet belgesi acilir. Bundan sonra iki kisi mesajlasabilir.
     await FirebaseFirestore.instance.collection("chats").doc(chatId).set({
       "chatId": chatId,
       "postId": data["postId"],
@@ -2918,6 +3387,7 @@ class IncomingRequestsPage extends StatelessWidget {
         requesterId: requesterName,
       },
       "blockedBy": [],
+      // Ilk dakikalarda fotograf gondermeyi kilitleyerek kotuye kullanimi azaltiriz.
       "photoUnlockAt": Timestamp.fromDate(
         chatOpenedAt.add(chatPhotoLockDuration),
       ),
@@ -2931,6 +3401,7 @@ class IncomingRequestsPage extends StatelessWidget {
       "lastMessageAt": FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
+    // Istege de "artik kabul edildi ve chat su" bilgisini yaziyoruz.
     await requestDoc.reference.update({
       "status": "accepted",
       "chatId": chatId,
@@ -2961,6 +3432,42 @@ class IncomingRequestsPage extends StatelessWidget {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Widget buildRequestGuide() {
+    return GlassPanel(
+      radius: 20,
+      padding: const EdgeInsets.all(16),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.swipe_outlined, color: AppColors.accent),
+              SizedBox(width: 8),
+              Text(
+                "İstek nasıl çalışır?",
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 10),
+          Text(
+            "1. Birisi itirafını sağa kaydırır.\n2. Burada sana kart olarak düşer.\n3. Sağa kaydırırsan kabul, sola kaydırırsan red.\n4. Kabul edersen sohbet otomatik açılır.",
+            style: TextStyle(
+              color: AppColors.softText,
+              fontSize: 13,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget buildRequestCard(
@@ -3117,11 +3624,13 @@ class IncomingRequestsPage extends StatelessWidget {
                     .toList();
 
                 if (docs.isEmpty) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text(
-                        "Henüz gelen istek yok.\nBirisi “Bu ben olabilirim” dediğinde burada kart olarak görünecek.",
+                  return ListView(
+                    padding: const EdgeInsets.all(20),
+                    children: [
+                      buildRequestGuide(),
+                      const SizedBox(height: 28),
+                      const Text(
+                        "Henüz gelen istek yok.\nBirisi itirafını sağa kaydırdığında burada kart olarak görünecek.",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: AppColors.softText,
@@ -3129,16 +3638,20 @@ class IncomingRequestsPage extends StatelessWidget {
                           height: 1.5,
                         ),
                       ),
-                    ),
+                    ],
                   );
                 }
 
                 return ListView.separated(
                   padding: const EdgeInsets.all(20),
-                  itemCount: docs.length,
+                  itemCount: docs.length + 1,
                   separatorBuilder: (_, _) => const SizedBox(height: 16),
                   itemBuilder: (context, index) {
-                    return buildRequestCard(context, docs[index]);
+                    if (index == 0) {
+                      return buildRequestGuide();
+                    }
+
+                    return buildRequestCard(context, docs[index - 1]);
                   },
                 );
               },
@@ -3362,6 +3875,7 @@ class _ChatPageState extends State<ChatPage> {
       recordingSeconds++;
 
       if (recordingSeconds >= voiceRecordingMaxDuration.inSeconds) {
+        // Ses kaydi cok uzamasin diye sure dolunca otomatik durduruyoruz.
         isRecordingVoice = false;
         unawaited(stopVoiceRecording());
       }
@@ -3387,6 +3901,8 @@ class _ChatPageState extends State<ChatPage> {
       .collection("messages");
 
   DateTime? photoUnlockDate(Map<String, dynamic> chatData) {
+    // Yeni sohbetlerde kilit zamani photoUnlockAt alaninda tutulur.
+    // Eski kayitlarda bu alan yoksa createdAt + sure hesabina geri duseriz.
     final unlockData = chatData["photoUnlockAt"];
 
     if (unlockData is Timestamp) {
@@ -3429,6 +3945,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> updateChatPreview(String lastMessage) {
+    // Chat listesindeki son mesaj yazisi buradan guncellenir.
     return FirebaseFirestore.instance
         .collection("chats")
         .doc(widget.chatId)
@@ -3449,6 +3966,7 @@ class _ChatPageState extends State<ChatPage> {
     final blockedBy = List<String>.from(chatData["blockedBy"] ?? []);
 
     if (blockedBy.isNotEmpty) {
+      // Biri engellediyse sohbet artik yazmaya kapali kabul ediliyor.
       showMessage("Bu sohbet engellendiği için mesaj gönderilemez.");
       return;
     }
@@ -3458,6 +3976,8 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     try {
+      // Mesajlar chat belgesinin alt koleksiyonuna yazilir.
+      // Boylece sohbet bilgisi ve mesajlar ayri ama bagli kalir.
       await messagesRef.add({
         "senderId": user.uid,
         "text": text,
@@ -3498,6 +4018,7 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     if (!canSendPhotos(chatData)) {
+      // Fotograflar hemen acilmasin; once sohbet biraz "isinmis" olsun.
       showMessage("Fotoğraf göndermek için sayaç bitmeli.");
       return;
     }
@@ -3518,6 +4039,7 @@ class _ChatPageState extends State<ChatPage> {
 
       final photoSources = await prepareProfilePhotoSources(photos: [photo]);
 
+      // Foto da mesaj gibi yazilir; farki type=image ve imageSource alanidir.
       await messagesRef.add({
         "senderId": user.uid,
         "type": "image",
@@ -3550,6 +4072,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> startVoiceRecording() async {
     try {
+      // Ses kaydi native tarafta baslar. Flutter burada sadece komut gonderir.
       await appMediaChannel.invokeMethod<void>("startVoiceRecording");
 
       if (!mounted) {
@@ -3576,6 +4099,7 @@ class _ChatPageState extends State<ChatPage> {
         .toInt();
 
     try {
+      // Native taraf kaydi durdurur ve bize base64/dataUrl olarak geri verir.
       final dataUrl = await appMediaChannel.invokeMethod<String>(
         "stopVoiceRecording",
       );
@@ -3590,9 +4114,11 @@ class _ChatPageState extends State<ChatPage> {
       });
 
       if (!sendAfterStop || user == null || dataUrl == null) {
+        // Ekrandan cikarken durduruyorsak mesaj olarak gondermeyebiliriz.
         return;
       }
 
+      // Ses de normal mesajdir; sadece tipi voice ve audioSource alani vardir.
       await messagesRef.add({
         "senderId": user.uid,
         "type": "voice",
@@ -3639,6 +4165,8 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
+    // Engeli hem chat belgesine hem de blocks koleksiyonuna yaziyoruz.
+    // Chat belgesi mesaj atmayi keser, blocks koleksiyonu listelerde filtreleme yapar.
     await FirebaseFirestore.instance.collection("chats").doc(widget.chatId).set(
       {
         "blockedBy": FieldValue.arrayUnion([user.uid]),
@@ -3704,6 +4232,7 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
+    // Raporlar kullanicinin ekraninda gorunmez; moderasyon/inceleme icin Firestore'a gider.
     await FirebaseFirestore.instance.collection("reports").add({
       "reporterId": user.uid,
       "reportedUserId": widget.otherUserId,
@@ -3746,7 +4275,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
                 SizedBox(width: 8),
                 Text(
-                  "Sohbet kuralları",
+                  "Sohbet adımları",
                   style: TextStyle(
                     color: AppColors.text,
                     fontWeight: FontWeight.w800,
@@ -3756,7 +4285,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             SizedBox(height: 8),
             Text(
-              "Kibar ol. Israr etme. Telefon, açık adres veya özel bilgi isteme. Rahatsız hissedersen raporla ya da engelle.",
+              "1. Sohbet sadece iki taraf onaylayınca açılır.\n2. Önce mesajla tanış, acele özel bilgi isteme.\n3. Fotoğraf kilidi bitince fotoğraf gönderebilirsin.\n4. Rahatsız hissedersen raporla ya da engelle.",
               style: TextStyle(
                 color: AppColors.softText,
                 fontSize: 13,
@@ -4103,19 +4632,29 @@ class _CreateEncounterPageState extends State<CreateEncounterPage> {
     });
 
     try {
+      // Ilan yayinlanirken kullanicinin o anki konumunu aliyoruz.
+      // Bu konum, ilani sadece yakindaki kisilere gostermek icin kullaniliyor.
       final position = await getCurrentPositionSafely();
+
+      if (!isLocationInAnkara(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      )) {
+        showMessage(
+          "Pilot bölge şimdilik Ankara. Ankara dışından itiraf bırakılamıyor.",
+        );
+        return;
+      }
 
       if (!mounted) {
         return;
       }
 
-      final ownerName = isAnonymous
-          ? "Anonim"
-          : (user.displayName?.trim().isNotEmpty == true
-                ? user.displayName!.trim()
-                : "Kullanıcı");
+      final ownerProfile = await loadUserProfile(user);
+      final ownerName = isAnonymous ? "Anonim" : ownerProfile.name;
 
       await FirebaseFirestore.instance.collection("encounters").add({
+        // Bu belge "karsilasma ilani"nin Firestore'daki kaydidir.
         "place": placeController.text.trim(),
         "dateTimeText": dateTimeController.text.trim(),
         "description": descriptionController.text.trim(),
@@ -4126,8 +4665,13 @@ class _CreateEncounterPageState extends State<CreateEncounterPage> {
         "requestCount": 0,
         "ownerId": user.uid,
         "ownerName": ownerName,
+        // Anonim degilse ilan kartinda profil bilgisi gosterebilmek icin
+        // kullanicinin adini, yasini ve fotografini ilanla beraber kaydediyoruz.
         if (!isAnonymous) "ownerEmail": user.email,
+        if (!isAnonymous) "ownerAge": ownerProfile.age,
+        if (!isAnonymous) "ownerPhotoUrls": ownerProfile.photoUrls,
         "isAnonymous": isAnonymous,
+        // GeoPoint mesafe hesabi icin kullaniliyor; latitude/longitude da pratik okuma icin duruyor.
         "location": GeoPoint(position.latitude, position.longitude),
         "latitude": position.latitude,
         "longitude": position.longitude,
@@ -4172,7 +4716,7 @@ class _CreateEncounterPageState extends State<CreateEncounterPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.text,
-        title: const Text("Karşılaşma Bırak"),
+        title: const Text("İtiraf Bırak"),
       ),
       body: AppBackdrop(
         child: SafeArea(
@@ -4344,19 +4888,79 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   late Future<Position> positionFuture;
   double radiusKm = 5;
   Set<String> blockedUserIds = {};
+  Set<String> dismissedPostIds = {};
+  bool isLoadingDismissedPosts = true;
 
   @override
   void initState() {
     super.initState();
     positionFuture = getCurrentPositionSafely();
     unawaited(loadBlockedUsers());
+    unawaited(loadDismissedPosts());
   }
 
   void refreshLocation() {
+    // Kullanici konumunu yenilemek isterse Future'i bastan kuruyoruz.
     setState(() {
       positionFuture = getCurrentPositionSafely();
     });
     unawaited(loadBlockedUsers());
+    unawaited(loadDismissedPosts());
+  }
+
+  Future<void> loadDismissedPosts() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      if (mounted) {
+        setState(() {
+          isLoadingDismissedPosts = false;
+        });
+      }
+      return;
+    }
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection("users")
+          .doc(user.uid)
+          .get();
+      final data = doc.data();
+      final rawIds = data?["dismissedEncounterIds"];
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        dismissedPostIds = rawIds is List
+            ? rawIds
+                  .map((id) => id.toString())
+                  .where((id) => id.isNotEmpty)
+                  .toSet()
+            : <String>{};
+        isLoadingDismissedPosts = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          isLoadingDismissedPosts = false;
+        });
+      }
+    }
+  }
+
+  Future<void> rememberDismissedPost(String postId) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null || postId.isEmpty) {
+      return;
+    }
+
+    await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
+      "dismissedEncounterIds": FieldValue.arrayUnion([postId]),
+      "updatedAt": FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Future<void> loadBlockedUsers() async {
@@ -4366,6 +4970,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       return;
     }
 
+    // Engellenen kisilerin ilanlarini listede hic gostermemek icin UID listesi cekiyoruz.
     final snapshot = await FirebaseFirestore.instance
         .collection("blocks")
         .where("blockerId", isEqualTo: user.uid)
@@ -4431,6 +5036,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       return;
     }
 
+    // Ilan raporu da normal kullanici raporu gibi reports koleksiyonuna gider.
     await FirebaseFirestore.instance.collection("reports").add({
       "type": "encounter",
       "reporterId": user.uid,
@@ -4456,6 +5062,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       return;
     }
 
+    // Ilan sahibini engelleyince o kisinin ilanlarini bu ekranda filtreleyecegiz.
     await FirebaseFirestore.instance
         .collection("blocks")
         .doc("${user.uid}_${post.ownerId}")
@@ -4477,27 +5084,28 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     showMessage("Kullanici engellendi.");
   }
 
-  Future<void> sendInterest(EncounterPost post) async {
+  Future<bool> sendInterest(EncounterPost post) async {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       showMessage("Önce giriş yapmalısın.");
-      return;
+      return false;
     }
 
     if (post.ownerId == user.uid) {
       showMessage("Kendi ilanına istek gönderemezsin.");
-      return;
+      return false;
     }
 
     try {
       final profile = await loadUserProfile(user);
 
       if (!mounted) {
-        return;
+        return false;
       }
 
       final requestId = "${post.id}_${user.uid}";
+      // Bir kullanici ayni ilana birden fazla bekleyen istek atamasin diye ID sabit.
       final requestRef = FirebaseFirestore.instance
           .collection("interest_requests")
           .doc(requestId);
@@ -4505,20 +5113,22 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       final existingStatus = existingRequest.data()?["status"];
 
       if (!mounted) {
-        return;
+        return false;
       }
 
       if (existingStatus == "pending") {
+        // Ayni ilana ikinci kez bekleyen istek acmayalim.
         showMessage("Bu itiraf için isteğin zaten beklemede.");
-        return;
+        return true;
       }
 
       if (existingStatus == "accepted") {
         showMessage("Bu itiraf için sohbet zaten açılmış.");
-        return;
+        return true;
       }
 
       await requestRef.set({
+        // Ilan sahibinin gorecegi basvuru karti burada olusur.
         "postId": post.id,
         "postPlace": post.place,
         "postOwnerId": post.ownerId,
@@ -4532,6 +5142,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       }, SetOptions(merge: true));
 
       if (!existingRequest.exists) {
+        // Ilk defa istek atiliyorsa ilanin sayacini 1 arttiriyoruz.
         await FirebaseFirestore.instance
             .collection("encounters")
             .doc(post.id)
@@ -4543,8 +5154,10 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       showMessage(
         "İstek gönderildi. İlan sahibi profilini sağa kaydırırsa sohbet açılacak.",
       );
+      return true;
     } catch (e) {
       showMessage("İstek gönderilirken hata oluştu: $e");
+      return false;
     }
   }
 
@@ -4594,6 +5207,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     required Position currentPosition,
   }) {
     final List<EncounterWithDistance> nearbyPosts = [];
+    // Secilen yaricap her yerde ayni degil: Ankara icin 50 km'ye kadar izin var.
     final effectiveRadiusKm = effectiveRadiusKmForLocation(
       requestedRadiusKm: radiusKm,
       latitude: currentPosition.latitude,
@@ -4604,9 +5218,11 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       final post = EncounterPost.fromDoc(doc);
 
       if (blockedUserIds.contains(post.ownerId)) {
+        // Kullanici birini engellediyse onun ilanini hic listeye sokmuyoruz.
         continue;
       }
 
+      // Firestore tum son ilanlari getirir; gercek mesafe filtresini burada uyguluyoruz.
       final distance = Geolocator.distanceBetween(
         currentPosition.latitude,
         currentPosition.longitude,
@@ -4623,7 +5239,19 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
 
     nearbyPosts.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
 
+    // En yakindaki ilan en ustte gorunsun diye sirali liste donuyoruz.
     return nearbyPosts;
+  }
+
+  List<EncounterWithDistance> availableSwipeItems(
+    List<EncounterWithDistance> nearbyPosts,
+  ) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    return nearbyPosts
+        .where((item) => !dismissedPostIds.contains(item.post.id))
+        .where((item) => item.post.ownerId != user?.uid)
+        .toList(growable: false);
   }
 
   Widget buildRadiusSelector(Position currentPosition) {
@@ -4641,6 +5269,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       longitude: currentPosition.longitude,
     );
 
+    // Kullanici burada "kac km cevreyi goreyim" secimini yapar.
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: GlassPanel(
@@ -4685,12 +5314,404 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     );
   }
 
+  Future<bool> confirmSwipe({
+    required DismissDirection direction,
+    required EncounterPost post,
+  }) async {
+    if (direction == DismissDirection.endToStart) {
+      return true;
+    }
+
+    if (direction == DismissDirection.startToEnd) {
+      return sendInterest(post);
+    }
+
+    return false;
+  }
+
+  void markPostDismissed(EncounterPost post, DismissDirection direction) {
+    final wasAlreadyDismissed = dismissedPostIds.contains(post.id);
+
+    setState(() {
+      dismissedPostIds = {...dismissedPostIds, post.id};
+    });
+
+    if (!wasAlreadyDismissed) {
+      unawaited(rememberDismissedPost(post.id).catchError((_) {}));
+    }
+
+    if (direction == DismissDirection.endToStart) {
+      showMessage("İtiraf geçildi.");
+    }
+  }
+
+  Widget buildExploreEyeFooter() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+      child: Center(child: appLogo(size: 58)),
+    );
+  }
+
+  Widget buildDismissBackground({
+    required Alignment alignment,
+    required Color color,
+    required IconData icon,
+    required String label,
+  }) {
+    return Container(
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 28),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 30),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildDetailRow({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    if (value.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.secondary, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppColors.softText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 15,
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color anonymousAvatarColor(String seed) {
+    const colors = [
+      AppColors.secondary,
+      AppColors.violet,
+      Color(0xFFFFB000),
+      Color(0xFF7A2CB8),
+      Color(0xFF0F8F43),
+      Color(0xFFFF7A2B),
+    ];
+
+    final hash = seed.codeUnits.fold<int>(
+      0,
+      (value, codeUnit) => value + codeUnit,
+    );
+    return colors[hash % colors.length];
+  }
+
+  Widget buildPostOwnerAvatar(EncounterPost post, {double size = 58}) {
+    // Anonim ilanlarda gercek fotograf yok: uygulamanin goz ikonunu
+    // ilan id'sinden gelen farkli bir renkle avatar gibi kullaniyoruz.
+    if (post.isAnonymous) {
+      return appLogo(size: size, color: anonymousAvatarColor(post.id));
+    }
+
+    if (post.ownerPhotoUrls.isEmpty) {
+      return appLogo(size: size, color: AppColors.secondary);
+    }
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: buildSavedProfilePhotoImage(post.ownerPhotoUrls.first),
+    );
+  }
+
+  String ownerDisplayName(EncounterPost post) {
+    if (post.isAnonymous) {
+      return "Anonim";
+    }
+
+    if (post.ownerAge == null) {
+      return post.ownerName;
+    }
+
+    return "${post.ownerName}, ${post.ownerAge}";
+  }
+
+  Widget buildOwnerIdentityBlock(EncounterPost post) {
+    return Row(
+      children: [
+        buildPostOwnerAvatar(post, size: 58),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                ownerDisplayName(post),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                post.isAnonymous ? "Kimliğini gizli paylaştı" : "Açık kimlik",
+                style: const TextStyle(
+                  color: AppColors.softText,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget buildSwipeEncounterCard(EncounterWithDistance item) {
+    final post = item.post;
+
+    return GlassPanel(
+      radius: 28,
+      padding: const EdgeInsets.all(20),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: buildOwnerIdentityBlock(post)),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, color: AppColors.softText),
+                  onSelected: (value) {
+                    if (value == "report") {
+                      reportEncounterPost(post);
+                    }
+
+                    if (value == "block") {
+                      blockEncounterOwner(post);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: "report",
+                      child: Text("İlanı raporla"),
+                    ),
+                    PopupMenuItem(
+                      value: "block",
+                      child: Text("Kullanıcıyı engelle"),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.location_on_outlined,
+                  color: AppColors.accent,
+                  size: 24,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        post.place,
+                        style: const TextStyle(
+                          color: AppColors.text,
+                          fontSize: 23,
+                          fontWeight: FontWeight.w900,
+                          height: 1.08,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        "${formatDistance(item.distanceMeters)} · ${formatCreatedAt(post.createdAt)}",
+                        style: const TextStyle(
+                          color: AppColors.accent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                buildPostChip(
+                  icon: Icons.favorite_border,
+                  label: "${post.requestCount} istek",
+                  color: AppColors.accent,
+                ),
+                buildPostChip(
+                  icon: post.isAnonymous
+                      ? Icons.visibility_off_outlined
+                      : Icons.badge_outlined,
+                  label: post.isAnonymous ? "Anonim" : "Açık kimlik",
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            buildDetailRow(
+              icon: Icons.access_time,
+              title: "Ne zaman?",
+              value: post.dateTimeText,
+            ),
+            buildDetailRow(
+              icon: Icons.person_search_outlined,
+              title: "Kişiyi nasıl hatırlıyor?",
+              value: post.description,
+            ),
+            buildDetailRow(
+              icon: Icons.edit_note,
+              title: "Kısa not",
+              value: post.note,
+            ),
+            buildDetailRow(
+              icon: Icons.palette_outlined,
+              title: "Görünüm",
+              value: post.personAppearance,
+            ),
+            buildDetailRow(
+              icon: Icons.badge_outlined,
+              title: "Ayırt edici özellikler",
+              value: post.personTraits,
+            ),
+            buildDetailRow(
+              icon: Icons.directions_car_outlined,
+              title: "Araç plakası",
+              value: post.vehiclePlate,
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.backgroundSoft.withValues(alpha: 0.78),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Text(
+                "Sağa kaydırırsan ilan sahibine istek gider. Sola kaydırırsan bu itirafı geçersin.",
+                style: TextStyle(
+                  color: AppColors.softText,
+                  fontSize: 13,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget buildSwipeDeck(List<EncounterWithDistance> cards) {
+    final currentItem = cards.first;
+    final post = currentItem.post;
+
+    return Column(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Dismissible(
+              key: ValueKey("encounter_swipe_${post.id}"),
+              direction: DismissDirection.horizontal,
+              confirmDismiss: (direction) =>
+                  confirmSwipe(direction: direction, post: post),
+              onDismissed: (direction) => markPostDismissed(post, direction),
+              background: buildDismissBackground(
+                alignment: Alignment.centerLeft,
+                color: AppColors.accent,
+                icon: Icons.favorite,
+                label: "İstek gönder",
+              ),
+              secondaryBackground: buildDismissBackground(
+                alignment: Alignment.centerRight,
+                color: AppColors.danger,
+                icon: Icons.close,
+                label: "Geç",
+              ),
+              child: SizedBox.expand(
+                child: buildSwipeEncounterCard(currentItem),
+              ),
+            ),
+          ),
+        ),
+        buildExploreEyeFooter(),
+      ],
+    );
+  }
+
   Widget buildInterestButton(EncounterPost post) {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       return OutlinedButton.icon(
-        onPressed: () => sendInterest(post),
+        onPressed: () {
+          unawaited(sendInterest(post).then((_) {}));
+        },
         icon: const Icon(Icons.visibility_outlined),
         label: const Text("Bu ben olabilirim"),
         style: OutlinedButton.styleFrom(
@@ -4713,6 +5734,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
 
     final requestId = "${post.id}_${user.uid}";
 
+    // Butonun yazisi canli degisir: beklemede, kabul edildi veya tekrar gonder.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection("interest_requests")
@@ -4754,7 +5776,9 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
         }
 
         return OutlinedButton.icon(
-          onPressed: () => sendInterest(post),
+          onPressed: () {
+            unawaited(sendInterest(post).then((_) {}));
+          },
           icon: const Icon(Icons.visibility_outlined),
           label: Text(
             status == "rejected" ? "Tekrar İstek Gönder" : "Bu ben olabilirim",
@@ -4983,8 +6007,71 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     );
   }
 
+  Widget buildPilotRegionView() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: GlassPanel(
+          radius: 28,
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 74,
+                height: 74,
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Icon(
+                  Icons.location_city_outlined,
+                  color: AppColors.accent,
+                  size: 38,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                "Pilot bölge Ankara",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 25,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                "Şimdilik keşif ve itiraf bırakma akışı sadece Ankara içinde açık. Diğer şehirleri sonra ekleyeceğiz.",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.softText,
+                  fontSize: 15,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: refreshLocation,
+                  icon: const Icon(Icons.my_location),
+                  label: const Text("Konumu tekrar kontrol et"),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget buildPostsList(Position currentPosition) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      // Firestore'dan son 100 ilani canli dinliyoruz.
+      // Sonra asagida mesafeye gore kendi cihazimizda suzuyoruz.
       stream: FirebaseFirestore.instance
           .collection("encounters")
           .orderBy("createdAt", descending: true)
@@ -5016,30 +6103,25 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
           currentPosition: currentPosition,
         );
 
-        if (nearbyPosts.isEmpty) {
+        if (isLoadingDismissedPosts) {
           return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                "Yakınında henüz itiraf yok.\nİlk karşılaşmayı sen bırak.",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.softText,
-                  fontSize: 16,
-                  height: 1.5,
-                ),
-              ),
-            ),
+            child: CircularProgressIndicator(color: AppColors.accent),
           );
         }
 
-        return ListView.separated(
-          padding: const EdgeInsets.all(20),
-          itemCount: nearbyPosts.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            return buildEncounterCard(nearbyPosts[index]);
-          },
+        final cards = availableSwipeItems(nearbyPosts);
+
+        if (cards.isEmpty) {
+          return _EmptyEncounterSearch(
+            radiusSelector: buildRadiusSelector(currentPosition),
+          );
+        }
+
+        return Column(
+          children: [
+            buildRadiusSelector(currentPosition),
+            Expanded(child: buildSwipeDeck(cards)),
+          ],
         );
       },
     );
@@ -5077,12 +6159,14 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
 
               final currentPosition = positionSnapshot.data!;
 
-              return Column(
-                children: [
-                  buildRadiusSelector(currentPosition),
-                  Expanded(child: buildPostsList(currentPosition)),
-                ],
-              );
+              if (!isLocationInAnkara(
+                latitude: currentPosition.latitude,
+                longitude: currentPosition.longitude,
+              )) {
+                return buildPilotRegionView();
+              }
+
+              return buildPostsList(currentPosition);
             },
           ),
         ),

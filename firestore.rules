@@ -2,44 +2,56 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Kullanici giris yapmis mi? Cogu kuralin ilk kapisi bu.
     function signedIn() {
       return request.auth != null;
     }
 
+    // Giris yapan kullanicinin Firebase UID'si. "Bu belge benim mi?" diye bakarken kullanilir.
     function uid() {
       return request.auth.uid;
     }
 
+    // Update sirasinda sadece izin verdigimiz alanlar degismis mi kontrol eder.
+    // Basitce: kullanici aradan baska alanlari gizlice degistiremesin.
     function changedOnly(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
 
+    // Interest request'i sadece ilani acan kisi veya istegi atan kisi okuyabilsin.
     function requestParticipant(data) {
       return signedIn() &&
         (data.postOwnerId == uid() || data.interestedUserId == uid());
     }
 
+    // Chat'i sadece o sohbetin iki katilimcisindan biri okuyup guncelleyebilsin.
     function chatParticipant(data) {
       return signedIn() &&
         data.participants is list &&
         uid() in data.participants;
     }
 
+    // Mesaj alt koleksiyonunda once ust chat belgesine bakip kullanici katilimci mi kontrol ediyoruz.
     function existingChatParticipant(chatId) {
       return signedIn() &&
         uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
     }
 
     match /users/{userId} {
+      // Profil okunabilir ama herkes herkesi okuyamasin; kullanici kendi profilini okuyabilir.
       allow read: if signedIn() &&
         (userId == uid() || resource.data.email == request.auth.token.email);
+      // Kullanici sadece kendi users/{uid} belgesini yazabilir/silebilir.
       allow create, update, delete: if signedIn() && userId == uid();
     }
 
     match /usernames/{username} {
+      // Login ekrani kullanici adindan e-posta bulabilsin diye tekil get acik.
       allow get: if true;
+      // Ama tum kullanici adlari listelenemesin.
       allow list: if false;
 
+      // Kullanici adi ilk alanindir. Varsa tekrar create edilemez.
       allow create: if signedIn() &&
         request.resource.data.uid == uid() &&
         request.resource.data.usernameLower == username &&
@@ -51,8 +63,10 @@ service cloud.firestore {
     }
 
     match /encounters/{encounterId} {
+      // Ilanlari sadece giris yapan kullanicilar okuyabilir.
       allow read: if signedIn();
 
+      // Ilan olusturan kisi ownerId olarak kendini yazmak zorunda.
       allow create: if signedIn() &&
         request.resource.data.ownerId == uid() &&
         request.resource.data.place is string &&
@@ -61,10 +75,12 @@ service cloud.firestore {
 
       allow update: if signedIn() && (
         (
+          // Ilan sahibi kendi ilanini guncelleyebilir ama ownerId'yi baskasina ceviremez.
           resource.data.ownerId == uid() &&
           request.resource.data.ownerId == resource.data.ownerId
         ) ||
         (
+          // Diger kullanicilar sadece requestCount'u 1 arttirabilir.
           changedOnly(['requestCount']) &&
           request.resource.data.requestCount is int &&
           resource.data.requestCount is int &&
@@ -76,8 +92,10 @@ service cloud.firestore {
     }
 
     match /interest_requests/{requestId} {
+      // Istegi sadece iki taraf okuyabilir: ilan sahibi ve istegi atan kisi.
       allow read: if requestParticipant(resource.data);
 
+      // Istek olusturan kisi interestedUserId olarak kendini yazmak zorunda.
       allow create: if signedIn() &&
         request.resource.data.interestedUserId == uid() &&
         request.resource.data.status == 'pending' &&
@@ -85,6 +103,7 @@ service cloud.firestore {
 
       allow update: if signedIn() && (
         (
+          // Ilan sahibi istegi kabul/red yapabilir.
           resource.data.postOwnerId == uid() &&
           request.resource.data.postOwnerId == resource.data.postOwnerId &&
           request.resource.data.interestedUserId == resource.data.interestedUserId &&
@@ -92,6 +111,7 @@ service cloud.firestore {
           request.resource.data.status in ['accepted', 'rejected']
         ) ||
         (
+          // Istegi atan kisi kendi bekleyen istegini tekrar ayni sekilde yazabilir.
           resource.data.interestedUserId == uid() &&
           request.resource.data.interestedUserId == uid() &&
           request.resource.data.postOwnerId == resource.data.postOwnerId &&
@@ -105,12 +125,15 @@ service cloud.firestore {
     }
 
     match /chats/{chatId} {
+      // Sohbeti sadece katilimcilar gorebilir.
       allow read: if chatParticipant(resource.data);
 
+      // Sohbet acilirken katilimci listesinde giris yapan kisi de olmak zorunda.
       allow create: if chatParticipant(request.resource.data) &&
         request.resource.data.participants.size() == 2 &&
         request.resource.data.blockedBy is list;
 
+      // Chat update sinirli: son mesaj, engel ve silinen katilimci gibi alanlar.
       allow update: if chatParticipant(resource.data) &&
         request.resource.data.participants == resource.data.participants &&
         changedOnly([
@@ -125,8 +148,10 @@ service cloud.firestore {
       allow delete: if false;
 
       match /messages/{messageId} {
+        // Mesaji sadece sohbet katilimcilari okuyabilir.
         allow read: if existingChatParticipant(chatId);
 
+        // Mesaj atan kisi senderId olarak kendini yazmak zorunda.
         allow create: if existingChatParticipant(chatId) &&
           request.resource.data.senderId == uid() &&
           request.resource.data.type in ['text', 'image', 'voice'];
@@ -139,14 +164,17 @@ service cloud.firestore {
     }
 
     match /blocks/{blockId} {
+      // Engel kaydinda blockerId her zaman giris yapan kullanici olmali.
       allow create, update: if signedIn() &&
         request.resource.data.blockerId == uid() &&
         request.resource.data.blockedUserId is string;
 
+      // Kullanici sadece kendi attigi engelleri okuyup silebilir.
       allow read, delete: if signedIn() && resource.data.blockerId == uid();
     }
 
     match /reports/{reportId} {
+      // Raporu atan kisi reporterId olarak kendini yazmak zorunda.
       allow create: if signedIn() &&
         request.resource.data.reporterId == uid() &&
         request.resource.data.reason is string;

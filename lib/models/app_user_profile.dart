@@ -24,6 +24,8 @@ class AppUserProfile {
   });
 
   factory AppUserProfile.fromMap(Map<String, dynamic> data, String uid) {
+    // Firestore verisi her zaman tertemiz gelmeyebilir.
+    // Bu constructor eksik/bozuk alanlari ekrani kirmayacak hale getirir.
     final birthDateData = data["birthDate"];
     final photoData = data["photoUrls"];
     final rawName = (data["displayName"] ?? data["name"] ?? "").toString();
@@ -44,6 +46,8 @@ class AppUserProfile {
   }
 
   Map<String, dynamic> toRequestSnapshot() {
+    // Bir ilana istek atarken profilin o anki kopyasini istege ekliyoruz.
+    // Ilan sahibi gelen istekte kullanicinin temel bilgilerini hemen gorebilsin.
     return {
       "requesterName": name,
       "requesterUsername": username,

@@ -3,9 +3,9 @@
     "short_name": "Piyasa",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFF7F1",
+    "theme_color": "#FF5A1F",
+    "description": "Piyasa, yakındaki karşılaşma itirafları ve karşılıklı onayla açılan sohbetler için tanışma uygulaması.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

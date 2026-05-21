@@ -5,7 +5,6 @@ const double ankaraCenterLongitude = 32.85411;
 const double ankaraDetectionRadiusKm = 85;
 const double ankaraMaxVisibleRadiusKm = 50;
 
-const List<double> defaultRadiusOptionsKm = [1, 3, 5, 10, 25];
 const List<double> ankaraRadiusOptionsKm = [1, 3, 5, 10, 25, 50];
 
 double distanceKmBetween({
@@ -14,6 +13,8 @@ double distanceKmBetween({
   required double toLatitude,
   required double toLongitude,
 }) {
+  // Iki koordinat arasindaki kus ucusu mesafeyi hesaplar.
+  // Basit anlatim: dunya yuvarlak oldugu icin normal cetvel hesabi kullanmiyoruz.
   const earthRadiusKm = 6371.0;
   final lat1 = _degreesToRadians(fromLatitude);
   final lat2 = _degreesToRadians(toLatitude);
@@ -32,6 +33,8 @@ double distanceKmBetween({
 }
 
 bool isLocationInAnkara({required double latitude, required double longitude}) {
+  // Ankara'nin merkezine yeterince yakinsa "Ankara'da" kabul ediyoruz.
+  // Bu kusursuz harita siniri degil, uygulama icin pratik bir cember.
   final distanceFromCenter = distanceKmBetween(
     fromLatitude: latitude,
     fromLongitude: longitude,
@@ -46,9 +49,11 @@ List<double> radiusOptionsForLocation({
   required double latitude,
   required double longitude,
 }) {
+  // Pilot bolge simdilik sadece Ankara.
+  // Ankara disinda yaricap secenegi gostermiyoruz.
   return isLocationInAnkara(latitude: latitude, longitude: longitude)
       ? ankaraRadiusOptionsKm
-      : defaultRadiusOptionsKm;
+      : const [];
 }
 
 double effectiveRadiusKmForLocation({
@@ -61,7 +66,12 @@ double effectiveRadiusKmForLocation({
     longitude: longitude,
   );
 
+  if (options.isEmpty) {
+    return ankaraRadiusOptionsKm.first;
+  }
+
   if (options.contains(requestedRadiusKm)) {
+    // Secilen deger izinli listedeyse aynen kullan.
     return requestedRadiusKm;
   }
 
@@ -69,6 +79,7 @@ double effectiveRadiusKmForLocation({
       .where((option) => option <= requestedRadiusKm)
       .toList(growable: false);
 
+  // Izinli olmayan bir deger geldiyse en yakin kucuk izinli degere dusuruyoruz.
   return allowedOptions.isEmpty ? options.first : allowedOptions.last;
 }
 

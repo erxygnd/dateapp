@@ -10,6 +10,8 @@ class AccountDeletionService {
   final FirebaseFirestore firestore;
 
   Future<void> reauthenticateWithPassword(String password) async {
+    // Hesap silme hassas islem. Firebase "son zamanlarda giris yapti mi" diye bakar.
+    // Emin olmak icin kullanicidan sifreyi tekrar alip oturumu tazeliyoruz.
     final user = auth.currentUser;
     final email = user?.email;
 
@@ -28,6 +30,8 @@ class AccountDeletionService {
   }
 
   Future<void> deleteCurrentAccount() async {
+    // Sira onemli: once uygulama verilerini temizle, en son Firebase Auth hesabini sil.
+    // Auth hesabi once silinirse uid kaybolur ve hangi verileri silecegimizi bulmak zorlasir.
     final user = auth.currentUser;
 
     if (user == null) {
@@ -41,6 +45,7 @@ class AccountDeletionService {
     final userDoc = await firestore.collection('users').doc(uid).get();
     final usernameLower = userDoc.data()?['usernameLower']?.toString();
 
+    // Kullanicinin farkli koleksiyonlara dagilmis izlerini tek tek temizliyoruz.
     await _removeUserMessages(uid);
     await _deleteQuery(
       firestore.collection('blocks').where('blockerId', isEqualTo: uid),
@@ -62,13 +67,17 @@ class AccountDeletionService {
       firestore.collection('reports').where('reporterId', isEqualTo: uid),
     );
     if (usernameLower != null && usernameLower.isNotEmpty) {
+      // Kullanici adi rezervasyonunu da kaldiriyoruz ki ayni ad tekrar alinabilsin.
       await firestore.collection('usernames').doc(usernameLower).delete();
     }
     await firestore.collection('users').doc(uid).delete();
+    // En son Auth hesabini siliyoruz. Bundan sonra kullanici artik giris yapamaz.
     await user.delete();
   }
 
   Future<void> _removeUserMessages(String uid) async {
+    // Chat belgesini komple silmiyoruz; diger kullanicinin sohbet gecmisi tamamen kaybolmasin.
+    // Sadece silinen kullanicinin mesajlarini kaldirip sohbeti isaretliyoruz.
     final chats = await firestore
         .collection('chats')
         .where('participants', arrayContains: uid)
@@ -91,6 +100,8 @@ class AccountDeletionService {
     QuerySnapshot<Map<String, dynamic>> snapshot;
 
     do {
+      // Firestore batch tek seferde sinirli sayida islem kaldirir.
+      // Bu yuzden belgeleri 400'er 400'er silerek guvenli ilerliyoruz.
       snapshot = await query.limit(400).get();
 
       if (snapshot.docs.isEmpty) {

@@ -8,6 +8,8 @@ Future<AppUserProfile> loadUserProfile(User user) async {
   final doc = await users.doc(user.uid).get();
   var data = doc.data();
 
+  // Normalde profil users/{uid} belgesinde olur.
+  // Eski/yarim kayitlarda uid belgesi bos kalmissa e-posta ile bulmaya calisiyoruz.
   final profileLooksIncomplete =
       data == null ||
       data.isEmpty ||
@@ -25,6 +27,7 @@ Future<AppUserProfile> loadUserProfile(User user) async {
       data = byEmail.docs.first.data();
 
       if (byEmail.docs.first.id != user.uid) {
+        // Profil eski bir belge id'sinde bulunduysa ayni bilgiyi dogru uid altina kopyaliyoruz.
         await users.doc(user.uid).set({
           ...data,
           "uid": user.uid,
@@ -36,6 +39,7 @@ Future<AppUserProfile> loadUserProfile(User user) async {
 
   data ??= {};
 
+  // Firestore'dan eksik alan gelse bile ekrani patlatmamak icin varsayilan degerler koyuyoruz.
   return AppUserProfile.fromMap({
     "username": data["username"] ?? "",
     "name": data["name"] ?? user.displayName ?? "Kullanıcı",

@@ -14,5 +14,7 @@ class LocalProfilePhoto {
     required this.contentType,
   });
 
+  // Resim dosyasini Firestore'a yazilabilecek tek parca metne cevirir.
+  // Yani "fotograf" burada aslinda base64 denen uzun bir yaziya donusur.
   String toDataUrl() => "$profilePhotoDataPrefix${base64Encode(bytes)}";
 }
