@@ -1,4 +1,4 @@
-#include "my_application.h"
+﻿#include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
@@ -45,11 +45,11 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "Piyasa");
+    gtk_header_bar_set_title(header_bar, "Fıldır");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "Piyasa");
+    gtk_window_set_title(window, "Fıldır");
   }
 
   gtk_window_set_default_size(window, 1280, 720);

@@ -11,6 +11,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'app_config.dart';
 import 'app_theme.dart';
@@ -36,16 +37,42 @@ Future<void> main() async {
   runApp(const MyDatingApp());
 }
 
+String? loadedThemeUserId;
+
+Future<void> loadSavedThemeForUser(User user) async {
+  if (loadedThemeUserId == user.uid) {
+    return;
+  }
+
+  loadedThemeUserId = user.uid;
+
+  try {
+    final doc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(user.uid)
+        .get();
+    final themeMode = AppThemeChoice.fromValue(doc.data()?["themeMode"]);
+    appThemeController.value = themeMode;
+  } catch (_) {
+    // Tema yuklenemezse uygulama acilmaya devam eder; varsayilan koyu mod kalir.
+  }
+}
+
 class MyDatingApp extends StatelessWidget {
   const MyDatingApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Piyasa',
-      debugShowCheckedModeBanner: false,
-      theme: buildAppTheme(),
-      home: const StartupPage(),
+    return ValueListenableBuilder<AppThemeChoice>(
+      valueListenable: appThemeController,
+      builder: (context, themeChoice, child) {
+        return MaterialApp(
+          title: 'Fıldır',
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(themeChoice),
+          home: const StartupPage(),
+        );
+      },
     );
   }
 }
@@ -120,7 +147,7 @@ class AppSplashPage extends StatelessWidget {
                       appLogo(size: 54),
                       const SizedBox(width: 12),
                       const Text(
-                        "Piyasa",
+                        "Fıldır",
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 34,
@@ -157,7 +184,7 @@ class AppSplashPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  const LinearProgressIndicator(
+                  LinearProgressIndicator(
                     minHeight: 3,
                     color: AppColors.accent,
                     backgroundColor: Color(0x33FFFFFF),
@@ -179,37 +206,19 @@ class AppBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = AppColors.isDark;
+
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: RadialGradient(
-          center: Alignment(-0.95, -1),
-          radius: 1.1,
-          colors: [Color(0x3322C55E), Color(0x00FFFFFF)],
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: isDark
+              ? const [Color(0xFF211020), Color(0xFF120D1A), Color(0xFF1A1018)]
+              : [Colors.white, AppColors.background, AppColors.backgroundSoft],
         ),
       ),
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(1, 1),
-            radius: 1,
-            colors: [Color(0x2686EFAC), Color(0x00FFFFFF)],
-          ),
-        ),
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                AppColors.background,
-                AppColors.backgroundSoft,
-              ],
-            ),
-          ),
-          child: child,
-        ),
-      ),
+      child: child,
     );
   }
 }
@@ -236,11 +245,20 @@ class GlassPanel extends StatelessWidget {
         color: color ?? AppColors.card,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: AppColors.border),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: Color(0x1F14532D),
-            blurRadius: 20,
-            offset: Offset(0, 10),
+            color: AppColors.accent.withValues(
+              alpha: AppColors.isDark ? 0.16 : 0.10,
+            ),
+            blurRadius: 28,
+            offset: const Offset(0, 16),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: AppColors.isDark ? 0.22 : 0.06,
+            ),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -276,9 +294,11 @@ class AuthGate extends StatelessWidget {
         }
 
         if (snapshot.hasData) {
+          unawaited(loadSavedThemeForUser(snapshot.data!));
           return const WelcomePage();
         }
 
+        loadedThemeUserId = null;
         return const LoginPage();
       },
     );
@@ -290,7 +310,7 @@ class LoadingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       body: AppBackdrop(
         child: Center(
           child: CircularProgressIndicator(color: AppColors.accent),
@@ -334,7 +354,7 @@ String friendlyAuthError(FirebaseAuthException e) {
   // Firebase hata kodlari teknik gelir. Bu fonksiyon onlari insanca mesaja cevirir.
   switch (e.code) {
     case "invalid-email":
-      return "E-posta formatı hatalı.";
+      return "Geçerli bir mail gir.";
     case "user-disabled":
       return "Bu kullanıcı hesabı devre dışı bırakılmış.";
     case "user-not-found":
@@ -375,7 +395,7 @@ class AuthTextField extends StatelessWidget {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
-      style: const TextStyle(color: AppColors.text),
+      style: TextStyle(color: AppColors.text),
       validator: validator,
       decoration: baseInputDecoration(label: label, hint: hint, icon: icon),
     );
@@ -405,7 +425,7 @@ class AppTextField extends StatelessWidget {
     return TextFormField(
       controller: controller,
       maxLines: maxLines,
-      style: const TextStyle(color: AppColors.text),
+      style: TextStyle(color: AppColors.text),
       validator: (value) {
         if (value == null || value.trim().isEmpty) {
           return isRequired ? "$label boş bırakılamaz" : null;
@@ -447,6 +467,75 @@ String normalizeUsername(String value) {
 
 bool isValidUsername(String value) {
   return RegExp(r'^[a-zA-Z0-9_]{3,20}$').hasMatch(value.trim());
+}
+
+bool isValidEmail(String value) {
+  return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value.trim());
+}
+
+String onlyPhoneDigits(String value) {
+  return value.replaceAll(RegExp(r'\D'), "");
+}
+
+String? validatePhoneNumber(String? value) {
+  final phone = value?.trim() ?? "";
+  final digits = onlyPhoneDigits(phone);
+
+  if (phone.isEmpty) {
+    return "Telefon numarası boş bırakılamaz";
+  }
+
+  if (digits.length < 10 || digits.length > 15) {
+    return "Geçerli bir telefon numarası gir";
+  }
+
+  return null;
+}
+
+String? validateEmailAddress(String? value) {
+  final email = value?.trim() ?? "";
+
+  if (email.isEmpty) {
+    return "E-posta boş bırakılamaz";
+  }
+
+  if (!isValidEmail(email)) {
+    return "Geçerli bir mail gir";
+  }
+
+  return null;
+}
+
+String? validateRegisterPassword(String? value) {
+  final password = value ?? "";
+
+  if (password.trim().isEmpty) {
+    return "Şifre boş bırakılamaz";
+  }
+
+  if (password.length < 8) {
+    return "Şifre en az 8 karakter olmalı";
+  }
+
+  if (!RegExp(r'[A-ZÇĞİÖŞÜ]').hasMatch(password)) {
+    return "Şifre en az 1 büyük harf içermeli";
+  }
+
+  if (!RegExp(r'[a-zçğıöşü]').hasMatch(password)) {
+    return "Şifre en az 1 küçük harf içermeli";
+  }
+
+  if (!RegExp(r'[0-9]').hasMatch(password)) {
+    return "Şifre en az 1 rakam içermeli";
+  }
+
+  if (!RegExp(
+    r"""[!@#$%^&*(),.?":{}|<>_\-+=;/'\[\]\\`~]""",
+  ).hasMatch(password)) {
+    return "Şifre en az 1 noktalama işareti içermeli";
+  }
+
+  return null;
 }
 
 final Map<String, ImageProvider<Object>> profilePhotoImageProviderCache = {};
@@ -606,7 +695,7 @@ class ProfilePhotoPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           "Profil fotoğrafları",
           style: TextStyle(
             color: AppColors.text,
@@ -615,7 +704,7 @@ class ProfilePhotoPicker extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           "En az 1, en fazla 3 fotoğraf ekle.",
           style: TextStyle(color: AppColors.softText, fontSize: 13),
         ),
@@ -711,11 +800,7 @@ class _PhotoTile extends StatelessWidget {
                       color: AppColors.background.withValues(alpha: 0.72),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                      Icons.close,
-                      size: 16,
-                      color: AppColors.text,
-                    ),
+                    child: Icon(Icons.close, size: 16, color: AppColors.text),
                   ),
                 ),
               ),
@@ -740,10 +825,7 @@ class _PhotoTileMessage extends StatelessWidget {
         children: [
           Icon(icon, color: AppColors.softText, size: 24),
           const SizedBox(height: 6),
-          Text(
-            text,
-            style: const TextStyle(color: AppColors.softText, fontSize: 12),
-          ),
+          Text(text, style: TextStyle(color: AppColors.softText, fontSize: 12)),
         ],
       ),
     );
@@ -903,7 +985,7 @@ class _CropPhotoPageState extends State<CropPhotoPage> {
                             color: AppColors.background.withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(22),
                           ),
-                          child: const Center(
+                          child: Center(
                             child: CircularProgressIndicator(
                               color: AppColors.accent,
                             ),
@@ -1050,8 +1132,8 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 60),
                   appLogo(),
                   const SizedBox(height: 32),
-                  const Text(
-                    "Piyasa",
+                  Text(
+                    "Fıldır",
                     style: TextStyle(
                       color: AppColors.text,
                       fontSize: 46,
@@ -1059,7 +1141,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     "Hesabına giriş yap",
                     style: TextStyle(
                       color: AppColors.text,
@@ -1068,7 +1150,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
+                  Text(
                     "Yakınındaki karşılaşmaları gör, kendi itirafını bırak ve sadece karşılıklı onayla iletişim kur.",
                     style: TextStyle(
                       color: AppColors.softText,
@@ -1088,6 +1170,10 @@ class _LoginPageState extends State<LoginPage> {
                         return "E-posta veya kullanıcı adı boş bırakılamaz";
                       }
 
+                      if (value.contains("@") && !isValidEmail(value)) {
+                        return "Geçerli bir mail gir";
+                      }
+
                       return null;
                     },
                   ),
@@ -1095,7 +1181,7 @@ class _LoginPageState extends State<LoginPage> {
                   TextFormField(
                     controller: passwordController,
                     obscureText: isPasswordHidden,
-                    style: const TextStyle(color: AppColors.text),
+                    style: TextStyle(color: AppColors.text),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
                         return "Şifre boş bırakılamaz";
@@ -1147,7 +1233,7 @@ class _LoginPageState extends State<LoginPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
+                      Text(
                         "Hesabın yok mu?",
                         style: TextStyle(color: AppColors.softText),
                       ),
@@ -1190,6 +1276,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController birthDateController = TextEditingController();
   final TextEditingController bioController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
+  final TextEditingController phoneController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final TextEditingController passwordAgainController = TextEditingController();
 
@@ -1208,6 +1295,7 @@ class _RegisterPageState extends State<RegisterPage> {
     birthDateController.dispose();
     bioController.dispose();
     emailController.dispose();
+    phoneController.dispose();
     passwordController.dispose();
     passwordAgainController.dispose();
     super.dispose();
@@ -1304,6 +1392,8 @@ class _RegisterPageState extends State<RegisterPage> {
     try {
       final username = usernameController.text.trim();
       final usernameLower = normalizeUsername(username);
+      final phoneNumber = phoneController.text.trim();
+      final phoneDigits = onlyPhoneDigits(phoneNumber);
       final firestore = FirebaseFirestore.instance;
       final usernameRef = firestore.collection("usernames").doc(usernameLower);
       final existingUsername = await usernameRef.get();
@@ -1334,6 +1424,7 @@ class _RegisterPageState extends State<RegisterPage> {
           "username": username,
           "usernameLower": usernameLower,
           "email": emailController.text.trim(),
+          "phoneDigits": phoneDigits,
           "createdAt": FieldValue.serverTimestamp(),
         });
       } on FirebaseException {
@@ -1372,6 +1463,8 @@ class _RegisterPageState extends State<RegisterPage> {
             "gender": selectedGender,
             "bio": bioController.text.trim(),
             "email": emailController.text.trim(),
+            "phoneNumber": phoneNumber,
+            "phoneDigits": phoneDigits,
             "photoUrls": photoUrls,
             "photoUploadPending": false,
             "premium": PremiumAccess.defaultUserState(),
@@ -1433,7 +1526,7 @@ class _RegisterPageState extends State<RegisterPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   "Yeni hesap oluştur",
                   style: TextStyle(
                     color: AppColors.text,
@@ -1442,7 +1535,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   "Yakınındaki itirafları görmek ve karşılaşma bırakmak için hesap oluştur.",
                   style: TextStyle(
                     color: AppColors.softText,
@@ -1495,7 +1588,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   controller: birthDateController,
                   readOnly: true,
                   onTap: isLoading ? null : pickBirthDate,
-                  style: const TextStyle(color: AppColors.text),
+                  style: TextStyle(color: AppColors.text),
                   validator: (_) {
                     if (selectedBirthDate == null) {
                       return "Doğum tarihini seç";
@@ -1569,37 +1662,26 @@ class _RegisterPageState extends State<RegisterPage> {
                   hint: "ornek@mail.com",
                   icon: Icons.mail_outline,
                   keyboardType: TextInputType.emailAddress,
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return "E-posta boş bırakılamaz";
-                    }
-
-                    if (!value.contains("@")) {
-                      return "Geçerli bir e-posta gir";
-                    }
-
-                    return null;
-                  },
+                  validator: validateEmailAddress,
+                ),
+                const SizedBox(height: 16),
+                AuthTextField(
+                  controller: phoneController,
+                  label: "Telefon numarası",
+                  hint: "05xx xxx xx xx",
+                  icon: Icons.phone_iphone_outlined,
+                  keyboardType: TextInputType.phone,
+                  validator: validatePhoneNumber,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: passwordController,
                   obscureText: isPasswordHidden,
-                  style: const TextStyle(color: AppColors.text),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return "Şifre boş bırakılamaz";
-                    }
-
-                    if (value.length < 6) {
-                      return "Şifre en az 6 karakter olmalı";
-                    }
-
-                    return null;
-                  },
+                  style: TextStyle(color: AppColors.text),
+                  validator: validateRegisterPassword,
                   decoration: authPasswordDecoration(
                     label: "Şifre",
-                    hint: "En az 6 karakter",
+                    hint: "En az 8 karakter, A harfi ve ! gibi işaret",
                     isHidden: isPasswordHidden,
                     onPressed: () {
                       setState(() {
@@ -1612,7 +1694,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 TextFormField(
                   controller: passwordAgainController,
                   obscureText: isPasswordAgainHidden,
-                  style: const TextStyle(color: AppColors.text),
+                  style: TextStyle(color: AppColors.text),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return "Şifre tekrarı boş bırakılamaz";
@@ -1654,9 +1736,9 @@ class _RegisterPageState extends State<RegisterPage> {
                           });
                         },
                       ),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          "18 yaşından büyük olduğumu, açık adres/telefon gibi özel bilgiler paylaşmayacağımı ve karşılıklı onay olmadan iletişim kuramayacağımı kabul ediyorum.",
+                          "18 yaşından büyük olduğumu, ilan ve sohbetlerde açık adres/telefon gibi özel bilgiler paylaşmayacağımı ve karşılıklı onay olmadan iletişim kuramayacağımı kabul ediyorum.",
                           style: TextStyle(
                             color: AppColors.softText,
                             fontSize: 13,
@@ -1696,7 +1778,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text(
+                    Text(
                       "Zaten hesabın var mı?",
                       style: TextStyle(color: AppColors.softText),
                     ),
@@ -1720,10 +1802,6 @@ class _RegisterPageState extends State<RegisterPage> {
 class WelcomePage extends StatelessWidget {
   const WelcomePage({super.key});
 
-  Future<void> logout() async {
-    await FirebaseAuth.instance.signOut();
-  }
-
   void openPage(BuildContext context, Widget page) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => page));
   }
@@ -1740,6 +1818,7 @@ class WelcomePage extends StatelessWidget {
         onRequests: () => openPage(context, const IncomingRequestsPage()),
         onChats: () => openPage(context, const ChatListPage()),
         onBrowse: () => openPage(context, const BrowseEncountersPage()),
+        onSettings: () => openPage(context, const SettingsPage()),
       ),
       body: AppBackdrop(
         child: SafeArea(
@@ -1752,9 +1831,9 @@ class WelcomePage extends StatelessWidget {
                   children: [
                     appLogo(),
                     const SizedBox(width: 14),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        "Piyasa",
+                        "Fıldır",
                         style: TextStyle(
                           color: AppColors.text,
                           fontSize: 28,
@@ -1763,22 +1842,22 @@ class WelcomePage extends StatelessWidget {
                       ),
                     ),
                     _RoundIconButton(
-                      icon: Icons.logout_rounded,
-                      onPressed: logout,
+                      icon: Icons.settings_outlined,
+                      onPressed: () => openPage(context, const SettingsPage()),
                     ),
                   ],
                 ),
                 const SizedBox(height: 26),
                 Text(
                   "Merhaba, $userName",
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.secondary,
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   "Şehrin içinde yarım kalan anları bul.",
                   style: TextStyle(
                     color: AppColors.text,
@@ -1788,7 +1867,7 @@ class WelcomePage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text(
+                Text(
                   "Yakınındaki itirafları gör, kendi karşılaşmanı bırak. Sohbet sadece iki taraf onay verirse açılır.",
                   style: TextStyle(
                     color: AppColors.softText,
@@ -1848,7 +1927,7 @@ class WelcomePage extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                children: const [
+                                children: [
                                   _MetricChip(
                                     icon: Icons.radar_rounded,
                                     label: "Yakın çevre",
@@ -1863,7 +1942,7 @@ class WelcomePage extends StatelessWidget {
                                 ],
                               ),
                               const SizedBox(height: 150),
-                              const Text(
+                              Text(
                                 "Bugün bir bakış yarım kaldıysa, şehir onu unutmaz.",
                                 style: TextStyle(
                                   color: AppColors.text,
@@ -1873,7 +1952,7 @@ class WelcomePage extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(height: 14),
-                              const Text(
+                              Text(
                                 "Tam konum paylaşılmaz. Sadece yakınlık ve zaman bilgisiyle güvenli eşleşme akışı kurulur.",
                                 style: TextStyle(
                                   color: AppColors.softText,
@@ -1911,12 +1990,30 @@ class WelcomePage extends StatelessWidget {
                   height: 54,
                   child: OutlinedButton.icon(
                     onPressed: () =>
+                        openPage(context, const MyEncountersPage()),
+                    icon: const Icon(Icons.auto_stories_outlined),
+                    label: const Text("İtiraflarım"),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.text,
+                      side: BorderSide(color: AppColors.border),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
                         openPage(context, const BrowseEncountersPage()),
                     icon: const Icon(Icons.explore_outlined),
                     label: const Text("Yakındaki İtirafları Keşfet"),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.text,
-                      side: const BorderSide(color: AppColors.border),
+                      side: BorderSide(color: AppColors.border),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),
@@ -2071,7 +2168,7 @@ class _AppTutorialPageState extends State<AppTutorialPage> {
             const SizedBox(height: 24),
             Text(
               "Adım ${index + 1}",
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.secondary,
                 fontSize: 13,
                 fontWeight: FontWeight.w900,
@@ -2080,7 +2177,7 @@ class _AppTutorialPageState extends State<AppTutorialPage> {
             const SizedBox(height: 8),
             Text(
               step.title,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.text,
                 fontSize: 28,
                 fontWeight: FontWeight.w900,
@@ -2090,7 +2187,7 @@ class _AppTutorialPageState extends State<AppTutorialPage> {
             const SizedBox(height: 14),
             Text(
               step.body,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.softText,
                 fontSize: 15,
                 height: 1.45,
@@ -2103,16 +2200,12 @@ class _AppTutorialPageState extends State<AppTutorialPage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.check_circle,
-                      color: AppColors.accent,
-                      size: 20,
-                    ),
+                    Icon(Icons.check_circle, color: AppColors.accent, size: 20),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         bullet,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.text,
                           fontSize: 14,
                           height: 1.35,
@@ -2163,9 +2256,9 @@ class _AppTutorialPageState extends State<AppTutorialPage> {
                   children: [
                     appLogo(size: 48),
                     const SizedBox(width: 12),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        "Piyasa'yı hızlıca tanıyalım",
+                        "Fıldır'ı hızlıca tanıyalım",
                         style: TextStyle(
                           color: AppColors.text,
                           fontSize: 20,
@@ -2246,8 +2339,8 @@ class _RoundIconButton extends StatelessWidget {
         icon: Icon(icon),
         color: AppColors.text,
         style: IconButton.styleFrom(
-          backgroundColor: AppColors.cardSolid,
-          side: const BorderSide(color: AppColors.border),
+          backgroundColor: AppColors.cardSolid.withValues(alpha: 0.82),
+          side: BorderSide(color: AppColors.border),
         ),
       ),
     );
@@ -2270,9 +2363,9 @@ class _MetricChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: AppColors.cardSolid,
+        color: color.withValues(alpha: AppColors.isDark ? 0.14 : 0.10),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: color.withValues(alpha: 0.24)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2281,8 +2374,8 @@ class _MetricChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(
-              color: AppColors.text,
+            style: TextStyle(
+              color: AppColors.isDark ? const Color(0xFFF5B5CE) : color,
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
@@ -2380,7 +2473,7 @@ class _EmptyEncounterSearchState extends State<_EmptyEncounterSearch>
               ),
             ),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               "Şimdilik kaydıracak yeni itiraf yok.",
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -2390,7 +2483,7 @@ class _EmptyEncounterSearchState extends State<_EmptyEncounterSearch>
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               "Gösterilecek mesafeyi artırınca keşif alanı genişler. Yeni itiraf geldiğinde burada sıradaki kart olarak görünür.",
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -2422,6 +2515,7 @@ class PremiumBottomNav extends StatelessWidget {
   final VoidCallback onRequests;
   final VoidCallback onChats;
   final VoidCallback onBrowse;
+  final VoidCallback onSettings;
 
   const PremiumBottomNav({
     super.key,
@@ -2429,6 +2523,7 @@ class PremiumBottomNav extends StatelessWidget {
     required this.onRequests,
     required this.onChats,
     required this.onBrowse,
+    required this.onSettings,
   });
 
   @override
@@ -2436,9 +2531,11 @@ class PremiumBottomNav extends StatelessWidget {
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(18, 0, 18, 14),
       child: GlassPanel(
-        radius: 999,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        color: AppColors.backgroundSoft.withValues(alpha: 0.78),
+        radius: 18,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        color: AppColors.isDark
+            ? const Color(0xF21B1525)
+            : AppColors.card.withValues(alpha: 0.92),
         child: Row(
           children: [
             _NavButton(
@@ -2462,6 +2559,700 @@ class PremiumBottomNav extends StatelessWidget {
               onPressed: onBrowse,
               active: true,
             ),
+            _NavButton(
+              icon: Icons.settings_outlined,
+              label: "Ayar",
+              onPressed: onSettings,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  final AccountDeletionService accountDeletionService =
+      AccountDeletionService();
+
+  PermissionStatus? notificationStatus;
+  bool isSavingTheme = false;
+  bool isRequestingNotification = false;
+  bool isLoggingOut = false;
+  bool isDeletingAccount = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(loadNotificationStatus());
+  }
+
+  Future<void> loadNotificationStatus() async {
+    try {
+      final status = await Permission.notification.status;
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        notificationStatus = status;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        notificationStatus = PermissionStatus.denied;
+      });
+    }
+  }
+
+  Future<void> saveTheme(AppThemeChoice choice) async {
+    if (appThemeController.value == choice) {
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    appThemeController.value = choice;
+
+    if (user == null) {
+      showMessage("Oturum bulunamadı.");
+      return;
+    }
+
+    setState(() {
+      isSavingTheme = true;
+    });
+
+    try {
+      await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
+        // Tema kullanici tercihidir; hesaba yazarsak telefon degisse bile ayni kalir.
+        "themeMode": choice.firestoreValue,
+        "updatedAt": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      showMessage("Tema kaydedilemedi: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSavingTheme = false;
+        });
+      }
+    }
+  }
+
+  Future<void> requestNotificationPermission() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    setState(() {
+      isRequestingNotification = true;
+    });
+
+    try {
+      final status = await Permission.notification.request();
+
+      if (user != null) {
+        await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
+          // OS izninin son durumunu kaydediyoruz; asil izin yine telefon ayarlarinda durur.
+          "notificationPermission": status.name,
+          "notificationsUpdatedAt": FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        notificationStatus = status;
+      });
+
+      if (status.isGranted) {
+        showMessage("Bildirim izni açık.");
+      } else if (status.isPermanentlyDenied || status.isRestricted) {
+        await showNotificationSettingsDialog();
+      } else {
+        showMessage("Bildirim izni verilmedi.");
+      }
+    } catch (e) {
+      showMessage("Bildirim izni alınamadı: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          isRequestingNotification = false;
+        });
+      }
+    }
+  }
+
+  Future<void> showNotificationSettingsDialog() async {
+    final shouldOpenSettings = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: Text(
+            "Bildirim izni kapalı",
+            style: TextStyle(color: AppColors.text),
+          ),
+          content: Text(
+            "Telefon ayarlarından Fıldır bildirimlerini açman gerekiyor.",
+            style: TextStyle(color: AppColors.softText),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Vazgeç"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Ayarları Aç"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldOpenSettings == true) {
+      await openAppSettings();
+      await loadNotificationStatus();
+    }
+  }
+
+  String notificationStatusText() {
+    final status = notificationStatus;
+
+    if (status == null) {
+      return "Kontrol ediliyor";
+    }
+
+    if (status.isGranted) {
+      return "Açık";
+    }
+
+    if (status.isPermanentlyDenied || status.isRestricted) {
+      return "Telefon ayarlarından açılmalı";
+    }
+
+    return "Kapalı";
+  }
+
+  Future<String?> askDeletionPassword() async {
+    final passwordController = TextEditingController();
+
+    final password = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: Text(
+            "Şifreyi doğrula",
+            style: TextStyle(color: AppColors.text),
+          ),
+          content: TextField(
+            controller: passwordController,
+            obscureText: true,
+            autofocus: true,
+            style: TextStyle(color: AppColors.text),
+            decoration: const InputDecoration(hintText: "Hesap şifren"),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Vazgeç"),
+            ),
+            ElevatedButton(
+              onPressed: () =>
+                  Navigator.pop(context, passwordController.text.trim()),
+              child: const Text("Doğrula"),
+            ),
+          ],
+        );
+      },
+    );
+
+    passwordController.dispose();
+    return password;
+  }
+
+  Future<void> deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: Text(
+            "Hesabı kalıcı olarak sil",
+            style: TextStyle(color: AppColors.text),
+          ),
+          content: Text(
+            "Profilin, ilanların, isteklerin ve gönderdiğin sohbet mesajları silinir. Bu işlem geri alınamaz.",
+            style: TextStyle(color: AppColors.softText),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Vazgeç"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.danger,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Hesabı Sil"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final password = await askDeletionPassword();
+
+    if (password == null || password.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      isDeletingAccount = true;
+    });
+
+    try {
+      await accountDeletionService.reauthenticateWithPassword(password);
+      await accountDeletionService.deleteCurrentAccount();
+
+      if (!mounted) {
+        return;
+      }
+
+      showMessage("Hesabın silindi.");
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AuthGate()),
+        (route) => false,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (e.code == "wrong-password" || e.code == "invalid-credential") {
+        showMessage("Şifre hatalı. Tekrar dene.");
+      } else if (e.code == "requires-recent-login") {
+        showMessage("Güvenlik için tekrar giriş yapıp yeniden dene.");
+      } else {
+        showMessage(friendlyAuthError(e));
+      }
+    } catch (e) {
+      showMessage("Hesap silinemedi: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          isDeletingAccount = false;
+        });
+      }
+    }
+  }
+
+  Future<void> logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: Text("Hesaptan çık", style: TextStyle(color: AppColors.text)),
+          content: Text(
+            "Bu cihazda oturumun kapatılacak. İstediğin zaman tekrar giriş yapabilirsin.",
+            style: TextStyle(color: AppColors.softText),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Vazgeç"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Çıkış Yap"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      isLoggingOut = true;
+    });
+
+    await FirebaseAuth.instance.signOut();
+    loadedThemeUserId = null;
+
+    if (!mounted) {
+      return;
+    }
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AuthGate()),
+      (route) => false,
+    );
+  }
+
+  void showMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedTheme = appThemeController.value;
+    final notificationButtonText =
+        notificationStatus?.isPermanentlyDenied == true ||
+            notificationStatus?.isRestricted == true
+        ? "Telefon Ayarlarını Aç"
+        : "Bildirim İzni İste";
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(title: const Text("Ayarlar")),
+      body: AppBackdrop(
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GlassPanel(
+                  radius: 28,
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      appLogo(size: 58),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Uygulama ayarları",
+                              style: TextStyle(
+                                color: AppColors.text,
+                                fontSize: 21,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              "Tema, bildirim ve hesap işlemleri burada.",
+                              style: TextStyle(
+                                color: AppColors.softText,
+                                fontSize: 14,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _SettingsSection(
+                  title: "Tema",
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _ThemeChoiceCard(
+                              selected: selectedTheme == AppThemeChoice.light,
+                              icon: Icons.light_mode_outlined,
+                              title: "Beyaz",
+                              subtitle: "Açık görünüm",
+                              onTap: isSavingTheme
+                                  ? null
+                                  : () => saveTheme(AppThemeChoice.light),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _ThemeChoiceCard(
+                              selected: selectedTheme == AppThemeChoice.dark,
+                              icon: Icons.dark_mode_outlined,
+                              title: "Siyah",
+                              subtitle: "Koyu görünüm",
+                              onTap: isSavingTheme
+                                  ? null
+                                  : () => saveTheme(AppThemeChoice.dark),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _SettingsSection(
+                  title: "Bildirimler",
+                  child: _SettingsActionTile(
+                    icon: Icons.notifications_active_outlined,
+                    title: "Bildirim izni",
+                    subtitle: notificationStatusText(),
+                    trailing: isRequestingNotification
+                        ? SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.accent,
+                            ),
+                          )
+                        : Text(
+                            notificationButtonText,
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              color: AppColors.accent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                    onTap: isRequestingNotification
+                        ? null
+                        : requestNotificationPermission,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _SettingsSection(
+                  title: "Hesap",
+                  child: Column(
+                    children: [
+                      _SettingsActionTile(
+                        icon: Icons.logout_rounded,
+                        title: "Hesaptan çık",
+                        subtitle: "Bu cihazdaki oturumu kapat",
+                        trailing: isLoggingOut
+                            ? SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.accent,
+                                ),
+                              )
+                            : Icon(
+                                Icons.chevron_right,
+                                color: AppColors.softText,
+                              ),
+                        onTap: isLoggingOut || isDeletingAccount
+                            ? null
+                            : logout,
+                      ),
+                      Divider(height: 1, color: AppColors.border),
+                      _SettingsActionTile(
+                        icon: Icons.delete_outline,
+                        iconColor: AppColors.danger,
+                        title: "Hesabı sil",
+                        subtitle: "Profil ve hesap verilerini kalıcı sil",
+                        titleColor: AppColors.danger,
+                        trailing: isDeletingAccount
+                            ? SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.danger,
+                                ),
+                              )
+                            : Icon(
+                                Icons.chevron_right,
+                                color: AppColors.danger,
+                              ),
+                        onTap: isLoggingOut || isDeletingAccount
+                            ? null
+                            : deleteAccount,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _SettingsSection({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassPanel(
+      radius: 24,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeChoiceCard extends StatelessWidget {
+  final bool selected;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  const _ThemeChoiceCard({
+    required this.selected,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accent.withValues(alpha: 0.14)
+              : AppColors.inputFill,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected ? AppColors.accent : AppColors.border,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: selected ? AppColors.accent : AppColors.softText),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: AppColors.softText,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsActionTile extends StatelessWidget {
+  final IconData icon;
+  final Color? iconColor;
+  final String title;
+  final String subtitle;
+  final Color? titleColor;
+  final Widget trailing;
+  final VoidCallback? onTap;
+
+  const _SettingsActionTile({
+    required this.icon,
+    this.iconColor,
+    required this.title,
+    required this.subtitle,
+    this.titleColor,
+    required this.trailing,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: (iconColor ?? AppColors.accent).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(icon, color: iconColor ?? AppColors.accent, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: titleColor ?? AppColors.text,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: AppColors.softText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Flexible(child: trailing),
           ],
         ),
       ),
@@ -2534,9 +3325,7 @@ class _IdentitySegment extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             gradient: selected
-                ? const LinearGradient(
-                    colors: [AppColors.accent, Color(0xFFFFD166)],
-                  )
+                ? LinearGradient(colors: [AppColors.accent, Color(0xFFFFD166)])
                 : null,
             color: selected ? null : Colors.transparent,
             boxShadow: selected
@@ -2618,8 +3407,15 @@ class _NavButton extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(999),
         onTap: onPressed,
-        child: Padding(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: active
+                ? AppColors.accent.withValues(alpha: 0.10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2667,23 +3463,20 @@ class LegacyWelcomePage extends StatelessWidget {
                 children: [
                   Text(
                     "Merhaba, $userName",
-                    style: const TextStyle(
-                      color: AppColors.softText,
-                      fontSize: 15,
-                    ),
+                    style: TextStyle(color: AppColors.softText, fontSize: 15),
                   ),
                   const Spacer(),
                   IconButton(
                     onPressed: logout,
-                    icon: const Icon(Icons.logout, color: AppColors.softText),
+                    icon: Icon(Icons.logout, color: AppColors.softText),
                   ),
                 ],
               ),
               const SizedBox(height: 44),
               appLogo(),
               const SizedBox(height: 32),
-              const Text(
-                "Piyasa",
+              Text(
+                "Fıldır",
                 style: TextStyle(
                   color: AppColors.text,
                   fontSize: 42,
@@ -2692,7 +3485,7 @@ class LegacyWelcomePage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 "Gördün. Konuşamadın. Belki o da seni arıyordur.",
                 style: TextStyle(
                   color: AppColors.text,
@@ -2702,7 +3495,7 @@ class LegacyWelcomePage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 "Yakınındaki itirafları gör. Kendi karşılaşmanı bırak. Tam konumun karşı tarafa gösterilmez.",
                 style: TextStyle(
                   color: AppColors.softText,
@@ -2718,7 +3511,7 @@ class LegacyWelcomePage extends StatelessWidget {
                   borderRadius: BorderRadius.circular(22),
                   border: Border.all(color: AppColors.border),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Icon(
                       Icons.verified_user_outlined,
@@ -2754,7 +3547,7 @@ class LegacyWelcomePage extends StatelessWidget {
                   label: const Text("Profilim"),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.accent,
-                    side: const BorderSide(color: AppColors.border),
+                    side: BorderSide(color: AppColors.border),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
                     ),
@@ -2802,7 +3595,7 @@ class LegacyWelcomePage extends StatelessWidget {
                   label: const Text("Sohbetler"),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.accent,
-                    side: const BorderSide(color: AppColors.border),
+                    side: BorderSide(color: AppColors.border),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
                     ),
@@ -2844,7 +3637,7 @@ class LegacyWelcomePage extends StatelessWidget {
                   },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.accent,
-                    side: const BorderSide(color: AppColors.border),
+                    side: BorderSide(color: AppColors.border),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
                     ),
@@ -3062,7 +3855,7 @@ class _ProfilePageState extends State<ProfilePage> {
             controller: passwordController,
             obscureText: true,
             autofocus: true,
-            style: const TextStyle(color: AppColors.text),
+            style: TextStyle(color: AppColors.text),
             decoration: const InputDecoration(hintText: "Hesap sifren"),
           ),
           actions: [
@@ -3182,9 +3975,7 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       body: SafeArea(
         child: isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: AppColors.accent),
-              )
+            ? Center(child: CircularProgressIndicator(color: AppColors.accent))
             : SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: Form(
@@ -3194,7 +3985,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       TextFormField(
                         controller: usernameController,
                         readOnly: true,
-                        style: const TextStyle(color: AppColors.softText),
+                        style: TextStyle(color: AppColors.softText),
                         decoration: baseInputDecoration(
                           label: "Kullanıcı adı",
                           hint: "",
@@ -3220,7 +4011,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       TextFormField(
                         controller: birthDateController,
                         readOnly: true,
-                        style: const TextStyle(color: AppColors.softText),
+                        style: TextStyle(color: AppColors.softText),
                         decoration: baseInputDecoration(
                           label: "Doğum tarihi",
                           hint: "",
@@ -3231,7 +4022,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       TextFormField(
                         controller: genderController,
                         readOnly: true,
-                        style: const TextStyle(color: AppColors.softText),
+                        style: TextStyle(color: AppColors.softText),
                         decoration: baseInputDecoration(
                           label: "Cinsiyet",
                           hint: "",
@@ -3299,7 +4090,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               ? null
                               : deleteAccount,
                           icon: isDeletingAccount
-                              ? const SizedBox(
+                              ? SizedBox(
                                   width: 18,
                                   height: 18,
                                   child: CircularProgressIndicator(
@@ -3324,6 +4115,493 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
               ),
+      ),
+    );
+  }
+}
+
+class MyEncountersPage extends StatelessWidget {
+  const MyEncountersPage({super.key});
+
+  String formatCreatedAt(Timestamp? timestamp) {
+    if (timestamp == null) {
+      return "Az önce";
+    }
+
+    final diff = DateTime.now().difference(timestamp.toDate());
+
+    if (diff.inMinutes < 1) {
+      return "Az önce";
+    }
+
+    if (diff.inMinutes < 60) {
+      return "${diff.inMinutes} dk önce";
+    }
+
+    if (diff.inHours < 24) {
+      return "${diff.inHours} saat önce";
+    }
+
+    return "${diff.inDays} gün önce";
+  }
+
+  Widget buildChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.26)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildHeader(BuildContext context, int count) {
+    return GlassPanel(
+      radius: 24,
+      padding: const EdgeInsets.all(18),
+      color: AppColors.card.withValues(alpha: 0.88),
+      child: Row(
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: AppColors.accent.withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.accent.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Icon(Icons.auto_stories_outlined, color: AppColors.accent),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "İtiraflarım",
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 23,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  count == 0
+                      ? "Henüz bıraktığın bir karşılaşma yok."
+                      : "$count aktif itirafını buradan takip edebilirsin.",
+                  style: TextStyle(
+                    color: AppColors.softText,
+                    fontSize: 13,
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildEmptyState(BuildContext context) {
+    return GlassPanel(
+      radius: 26,
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        children: [
+          Container(
+            width: 74,
+            height: 74,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [AppColors.secondary, AppColors.accent],
+              ),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.accent.withValues(alpha: 0.24),
+                  blurRadius: 26,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: const Icon(Icons.edit_note, color: Colors.white, size: 34),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            "İlk itirafını bırak",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            "Kaçırdığın anı kısa ve güvenli bir not gibi yaz. Burada daha sonra gelen ilgileri takip edebilirsin.",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.softText,
+              fontSize: 14,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CreateEncounterPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.add_location_alt_outlined),
+              label: const Text("Yeni İtiraf Bırak"),
+              style: mainButtonStyle(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildDetailLine({
+    required IconData icon,
+    required String text,
+    Color? color,
+  }) {
+    if (text.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 9),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color ?? AppColors.secondary, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: AppColors.softText,
+                fontSize: 13,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildEncounterCard(BuildContext context, EncounterPost post) {
+    final quote = post.note.trim().isNotEmpty
+        ? post.note.trim()
+        : post.description.trim();
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.cardSolid,
+            AppColors.backgroundSoft,
+            AppColors.violetDark,
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.accent.withValues(alpha: 0.13),
+            blurRadius: 24,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      post.place,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontSize: 20,
+                        height: 1.1,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      "${post.dateTimeText} · ${formatCreatedAt(post.createdAt)}",
+                      style: TextStyle(
+                        color: AppColors.secondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              buildChip(
+                icon: Icons.favorite_border,
+                label: "${post.requestCount}",
+                color: AppColors.accent,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              buildChip(
+                icon: post.isAnonymous
+                    ? Icons.visibility_off_outlined
+                    : Icons.badge_outlined,
+                label: post.isAnonymous ? "Anonim" : "Açık kimlik",
+                color: const Color(0xFFF5B5CE),
+              ),
+              if (post.personAppearance.trim().isNotEmpty)
+                buildChip(
+                  icon: Icons.palette_outlined,
+                  label: post.personAppearance,
+                  color: AppColors.secondary,
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: AppColors.background.withValues(alpha: 0.42),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Text(
+              '"$quote"',
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 16,
+                height: 1.42,
+                fontStyle: FontStyle.italic,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          if (post.note.trim().isNotEmpty)
+            buildDetailLine(
+              icon: Icons.person_search_outlined,
+              text: post.description,
+            ),
+          buildDetailLine(icon: Icons.badge_outlined, text: post.personTraits),
+          buildDetailLine(
+            icon: Icons.directions_car_outlined,
+            text: post.vehiclePlate,
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const IncomingRequestsPage(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.style_outlined),
+                  label: Text(
+                    post.requestCount > 0 ? "İstekleri Gör" : "İstek Yok",
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: post.requestCount > 0
+                        ? AppColors.accent
+                        : AppColors.softText,
+                    side: BorderSide(
+                      color: post.requestCount > 0
+                          ? AppColors.accent.withValues(alpha: 0.5)
+                          : AppColors.border,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: AppColors.text,
+        title: const Text("İtiraflarım"),
+        actions: [
+          IconButton(
+            tooltip: "Yeni itiraf",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CreateEncounterPage()),
+              );
+            },
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+      body: AppBackdrop(
+        child: SafeArea(
+          child: user == null
+              ? Center(
+                  child: Text(
+                    "Önce giriş yapmalısın.",
+                    style: TextStyle(color: AppColors.softText),
+                  ),
+                )
+              : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection("encounters")
+                      .where("ownerId", isEqualTo: user.uid)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(
+                        child: CircularProgressIndicator(
+                          color: AppColors.accent,
+                        ),
+                      );
+                    }
+
+                    if (snapshot.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: Text(
+                            "İtirafların yüklenirken hata oluştu:\n${snapshot.error}",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppColors.softText,
+                              height: 1.45,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final posts =
+                        (snapshot.data?.docs ?? [])
+                            .map(EncounterPost.fromDoc)
+                            .toList()
+                          ..sort((a, b) {
+                            final aDate =
+                                a.createdAt?.toDate() ??
+                                DateTime.fromMillisecondsSinceEpoch(0);
+                            final bDate =
+                                b.createdAt?.toDate() ??
+                                DateTime.fromMillisecondsSinceEpoch(0);
+                            return bDate.compareTo(aDate);
+                          });
+
+                    return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                      itemCount: posts.length + 2,
+                      separatorBuilder: (_, _) => const SizedBox(height: 14),
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return buildHeader(context, posts.length);
+                        }
+
+                        if (posts.isEmpty) {
+                          return buildEmptyState(context);
+                        }
+
+                        if (index == 1) {
+                          return Row(
+                            children: [
+                              Text(
+                                "Son paylaşımlar",
+                                style: TextStyle(
+                                  color: AppColors.text,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const Spacer(),
+                              buildChip(
+                                icon: Icons.lock_outline,
+                                label: "Gizli takip",
+                                color: const Color(0xFFF5B5CE),
+                              ),
+                            ],
+                          );
+                        }
+
+                        return buildEncounterCard(context, posts[index - 2]);
+                      },
+                    );
+                  },
+                ),
+        ),
       ),
     );
   }
@@ -3438,7 +4716,7 @@ class IncomingRequestsPage extends StatelessWidget {
     return GlassPanel(
       radius: 20,
       padding: const EdgeInsets.all(16),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -3515,7 +4793,7 @@ class IncomingRequestsPage extends StatelessWidget {
           children: [
             Row(
               children: [
-                const CircleAvatar(
+                CircleAvatar(
                   backgroundColor: AppColors.accent,
                   foregroundColor: Colors.white,
                   child: Icon(Icons.person),
@@ -3524,7 +4802,7 @@ class IncomingRequestsPage extends StatelessWidget {
                 Expanded(
                   child: Text(
                     age is int ? "$name, $age" : name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.text,
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
@@ -3536,7 +4814,7 @@ class IncomingRequestsPage extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               bio,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.softText,
                 fontSize: 15,
                 height: 1.45,
@@ -3545,7 +4823,7 @@ class IncomingRequestsPage extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               "İlgilendiği itiraf: ${data["postPlace"] ?? "Karşılaşma"}",
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.accent,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -3601,7 +4879,7 @@ class IncomingRequestsPage extends StatelessWidget {
         title: const Text("Gelen İstekler"),
       ),
       body: user == null
-          ? const Center(
+          ? Center(
               child: Text(
                 "Önce giriş yapmalısın.",
                 style: TextStyle(color: AppColors.softText),
@@ -3614,7 +4892,7 @@ class IncomingRequestsPage extends StatelessWidget {
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
+                  return Center(
                     child: CircularProgressIndicator(color: AppColors.accent),
                   );
                 }
@@ -3629,7 +4907,7 @@ class IncomingRequestsPage extends StatelessWidget {
                     children: [
                       buildRequestGuide(),
                       const SizedBox(height: 28),
-                      const Text(
+                      Text(
                         "Henüz gelen istek yok.\nBirisi itirafını sağa kaydırdığında burada kart olarak görünecek.",
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -3675,7 +4953,7 @@ class ChatListPage extends StatelessWidget {
         title: const Text("Sohbetler"),
       ),
       body: user == null
-          ? const Center(
+          ? Center(
               child: Text(
                 "Önce giriş yapmalısın.",
                 style: TextStyle(color: AppColors.softText),
@@ -3688,7 +4966,7 @@ class ChatListPage extends StatelessWidget {
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
+                  return Center(
                     child: CircularProgressIndicator(color: AppColors.accent),
                   );
                 }
@@ -3696,7 +4974,7 @@ class ChatListPage extends StatelessWidget {
                 final docs = snapshot.data?.docs ?? [];
 
                 if (docs.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Text(
                       "Henüz sohbet yok.",
                       style: TextStyle(color: AppColors.softText),
@@ -3728,18 +5006,18 @@ class ChatListPage extends StatelessWidget {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),
-                      leading: const CircleAvatar(
+                      leading: CircleAvatar(
                         backgroundColor: AppColors.accent,
                         foregroundColor: Colors.white,
                         child: Icon(Icons.chat_bubble_outline),
                       ),
                       title: Text(
                         otherName,
-                        style: const TextStyle(color: AppColors.text),
+                        style: TextStyle(color: AppColors.text),
                       ),
                       subtitle: Text(
                         (data["lastMessage"] ?? "Sohbet açıldı.").toString(),
-                        style: const TextStyle(color: AppColors.softText),
+                        style: TextStyle(color: AppColors.softText),
                       ),
                       onTap: () {
                         Navigator.push(
@@ -3847,7 +5125,7 @@ class _PhotoLockCountdownState extends State<PhotoLockCountdown> {
   Widget build(BuildContext context) {
     return Text(
       "${remaining.inSeconds} sn",
-      style: const TextStyle(
+      style: TextStyle(
         color: AppColors.softText,
         fontSize: 12,
         fontWeight: FontWeight.w700,
@@ -4264,7 +5542,7 @@ class _ChatPageState extends State<ChatPage> {
       child: GlassPanel(
         radius: 18,
         padding: const EdgeInsets.all(14),
-        child: const Column(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -4383,7 +5661,7 @@ class _ChatPageState extends State<ChatPage> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColors.card,
-        border: const Border(top: BorderSide(color: AppColors.border)),
+        border: Border(top: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         children: [
@@ -4393,14 +5671,14 @@ class _ChatPageState extends State<ChatPage> {
               enabled: !isBlocked && !isRecordingVoice,
               minLines: 1,
               maxLines: 4,
-              style: const TextStyle(color: AppColors.text),
+              style: TextStyle(color: AppColors.text),
               decoration: InputDecoration(
                 hintText: isBlocked
                     ? "Bu sohbet engellendi"
                     : isRecordingVoice
                     ? "Ses kaydı alınıyor..."
                     : "Mesaj yaz",
-                hintStyle: const TextStyle(color: AppColors.softText),
+                hintStyle: TextStyle(color: AppColors.softText),
                 filled: true,
                 fillColor: AppColors.backgroundSoft,
                 border: OutlineInputBorder(
@@ -4436,7 +5714,7 @@ class _ChatPageState extends State<ChatPage> {
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(color: AppColors.border),
               ),
-              child: const Text(
+              child: Text(
                 "0 sn",
                 style: TextStyle(
                   color: AppColors.softText,
@@ -4466,7 +5744,7 @@ class _ChatPageState extends State<ChatPage> {
           if (isRecordingVoice)
             Text(
               "${recordingSeconds}s",
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.danger,
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
@@ -4521,7 +5799,7 @@ class _ChatPageState extends State<ChatPage> {
             ],
           ),
           body: user == null
-              ? const Center(
+              ? Center(
                   child: Text(
                     "Önce giriş yapmalısın.",
                     style: TextStyle(color: AppColors.softText),
@@ -4541,7 +5819,7 @@ class _ChatPageState extends State<ChatPage> {
                             builder: (context, snapshot) {
                               if (snapshot.connectionState ==
                                   ConnectionState.waiting) {
-                                return const Center(
+                                return Center(
                                   child: CircularProgressIndicator(
                                     color: AppColors.accent,
                                   ),
@@ -4726,7 +6004,7 @@ class _CreateEncounterPageState extends State<CreateEncounterPage> {
               key: formKey,
               child: Column(
                 children: [
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
                       "Nerede ve ne zaman gördün?",
@@ -4738,7 +6016,7 @@ class _CreateEncounterPageState extends State<CreateEncounterPage> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
+                  Text(
                     "Tam adres verme. AVM, cadde, kafe veya genel bölge yazman yeterli. Konum sadece yakın kişilere göstermek için alınır.",
                     style: TextStyle(
                       color: AppColors.softText,
@@ -5000,7 +6278,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
           content: TextField(
             controller: reasonController,
             maxLines: 3,
-            style: const TextStyle(color: AppColors.text),
+            style: TextStyle(color: AppColors.text),
             decoration: const InputDecoration(hintText: "Kisa bir sebep yaz"),
           ),
           actions: [
@@ -5142,13 +6420,17 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       }, SetOptions(merge: true));
 
       if (!existingRequest.exists) {
-        // Ilk defa istek atiliyorsa ilanin sayacini 1 arttiriyoruz.
-        await FirebaseFirestore.instance
-            .collection("encounters")
-            .doc(post.id)
-            .set({
-              "requestCount": FieldValue.increment(1),
-            }, SetOptions(merge: true));
+        // Ilk defa istek atiliyorsa ilanin sayacini 1 arttirmayi deneriz.
+        // Sayaç ikincil bilgi; izin/eski veri sorunu istegin kendisini basarisiz gostermesin.
+        unawaited(
+          FirebaseFirestore.instance
+              .collection("encounters")
+              .doc(post.id)
+              .set({
+                "requestCount": FieldValue.increment(1),
+              }, SetOptions(merge: true))
+              .catchError((_) {}),
+        );
       }
 
       showMessage(
@@ -5276,14 +6558,14 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            const Icon(Icons.radar, color: AppColors.accent),
+            Icon(Icons.radar, color: AppColors.accent),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 inAnkara
                     ? "Gösterilecek mesafe (Ankara için en fazla 50 km)"
                     : "Gösterilecek mesafe",
-                style: const TextStyle(color: AppColors.softText, fontSize: 14),
+                style: TextStyle(color: AppColors.softText, fontSize: 14),
               ),
             ),
             DropdownButton<double>(
@@ -5345,10 +6627,114 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     }
   }
 
-  Widget buildExploreEyeFooter() {
+  Future<void> actOnEncounter({
+    required EncounterPost post,
+    required DismissDirection direction,
+  }) async {
+    final shouldDismiss = await confirmSwipe(direction: direction, post: post);
+
+    if (!mounted || !shouldDismiss) {
+      return;
+    }
+
+    markPostDismissed(post, direction);
+  }
+
+  Widget buildEncounterActionButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required Color foreground,
+    bool primary = false,
+  }) {
+    final size = primary ? 62.0 : 48.0;
+
+    return SizedBox.square(
+      dimension: size,
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon, size: primary ? 30 : 23),
+        color: foreground,
+        style: IconButton.styleFrom(
+          backgroundColor: primary
+              ? AppColors.accent
+              : AppColors.cardSolid.withValues(alpha: 0.76),
+          side: BorderSide(
+            color: primary
+                ? AppColors.accent.withValues(alpha: 0.80)
+                : AppColors.border,
+          ),
+          shape: const CircleBorder(),
+        ),
+      ),
+    );
+  }
+
+  Widget buildEncounterActions(EncounterWithDistance item) {
+    final post = item.post;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
-      child: Center(child: appLogo(size: 58)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              buildEncounterActionButton(
+                icon: Icons.close,
+                foreground: AppColors.softText,
+                onPressed: () => unawaited(
+                  actOnEncounter(
+                    post: post,
+                    direction: DismissDirection.endToStart,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 20),
+              buildEncounterActionButton(
+                icon: Icons.favorite,
+                foreground: Colors.white,
+                primary: true,
+                onPressed: () => unawaited(
+                  actOnEncounter(
+                    post: post,
+                    direction: DismissDirection.startToEnd,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 20),
+              buildEncounterActionButton(
+                icon: Icons.chat_bubble_outline,
+                foreground: AppColors.softText,
+                onPressed: () => unawaited(
+                  actOnEncounter(
+                    post: post,
+                    direction: DismissDirection.startToEnd,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              buildPostChip(
+                icon: Icons.lock_outline,
+                label: "Gizli eşleşme",
+                color: const Color(0xFFF5B5CE),
+              ),
+              buildPostChip(
+                icon: Icons.location_on_outlined,
+                label: formatDistance(item.distanceMeters),
+                color: AppColors.secondary,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -5406,7 +6792,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.softText,
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -5415,7 +6801,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
                 const SizedBox(height: 3),
                 Text(
                   value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.text,
                     fontSize: 15,
                     height: 1.35,
@@ -5431,7 +6817,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   }
 
   Color anonymousAvatarColor(String seed) {
-    const colors = [
+    final colors = [
       AppColors.secondary,
       AppColors.violet,
       Color(0xFFFFB000),
@@ -5495,7 +6881,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
                 ownerDisplayName(post),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.text,
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
@@ -5504,7 +6890,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
               const SizedBox(height: 4),
               Text(
                 post.isAnonymous ? "Kimliğini gizli paylaştı" : "Açık kimlik",
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.softText,
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -5519,145 +6905,244 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
 
   Widget buildSwipeEncounterCard(EncounterWithDistance item) {
     final post = item.post;
+    final quote = post.note.trim().isNotEmpty
+        ? post.note.trim()
+        : post.description.trim();
+    final identityLabel = post.isAnonymous
+        ? "ANONİM İTİRAF"
+        : ownerDisplayName(post).toUpperCase();
 
-    return GlassPanel(
-      radius: 28,
-      padding: const EdgeInsets.all(20),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.border),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            AppColors.violet,
+            AppColors.backgroundSoft,
+            AppColors.violetDark,
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.accent.withValues(alpha: 0.22),
+            blurRadius: 34,
+            offset: const Offset(0, 22),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.34),
+            blurRadius: 24,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: Stack(
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(child: buildOwnerIdentityBlock(post)),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, color: AppColors.softText),
-                  onSelected: (value) {
-                    if (value == "report") {
-                      reportEncounterPost(post);
-                    }
-
-                    if (value == "block") {
-                      blockEncounterOwner(post);
-                    }
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      value: "report",
-                      child: Text("İlanı raporla"),
-                    ),
-                    PopupMenuItem(
-                      value: "block",
-                      child: Text("Kullanıcıyı engelle"),
-                    ),
-                  ],
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x1AFF4D93), Color(0x33120D1A)],
+                  ),
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 18),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(
-                  Icons.location_on_outlined,
-                  color: AppColors.accent,
-                  size: 24,
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
+            Positioned(
+              top: 8,
+              right: 6,
+              child: PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: AppColors.softText),
+                color: AppColors.cardSolid,
+                onSelected: (value) {
+                  if (value == "report") {
+                    reportEncounterPost(post);
+                  }
+
+                  if (value == "block") {
+                    blockEncounterOwner(post);
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: "report", child: Text("İlanı raporla")),
+                  PopupMenuItem(
+                    value: "block",
+                    child: Text("Kullanıcıyı engelle"),
+                  ),
+                ],
+              ),
+            ),
+            SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(22, 16, 22, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 46,
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5B5CE).withValues(alpha: 0.36),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 42),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      buildPostChip(
+                        icon: post.isAnonymous
+                            ? Icons.visibility_off_outlined
+                            : Icons.badge_outlined,
+                        label: post.isAnonymous ? "Anonim" : "Açık kimlik",
+                        color: const Color(0xFFF5B5CE),
+                      ),
+                      buildPostChip(
+                        icon: Icons.favorite_border,
+                        label: "${post.requestCount} istek",
+                        color: AppColors.accent,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 34),
+                  Text(
+                    identityLabel,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFF5B5CE),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '"$quote"',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 22,
+                      height: 1.28,
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: AppColors.softText,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "KAYDIR VEYA KALBE DOKUN",
+                    style: TextStyle(
+                      color: AppColors.softText.withValues(alpha: 0.74),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  Container(
+                    width: double.infinity,
+                    height: 1,
+                    color: AppColors.border.withValues(alpha: 0.55),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        post.place,
-                        style: const TextStyle(
-                          color: AppColors.text,
-                          fontSize: 23,
-                          fontWeight: FontWeight.w900,
-                          height: 1.08,
-                        ),
+                      Icon(
+                        Icons.location_on_outlined,
+                        color: AppColors.accent,
+                        size: 22,
                       ),
-                      const SizedBox(height: 7),
-                      Text(
-                        "${formatDistance(item.distanceMeters)} · ${formatCreatedAt(post.createdAt)}",
-                        style: const TextStyle(
-                          color: AppColors.accent,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              post.place,
+                              style: TextStyle(
+                                color: AppColors.text,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                height: 1.1,
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            Text(
+                              "${formatDistance(item.distanceMeters)} · ${formatCreatedAt(post.createdAt)}",
+                              style: TextStyle(
+                                color: AppColors.secondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                buildPostChip(
-                  icon: Icons.favorite_border,
-                  label: "${post.requestCount} istek",
-                  color: AppColors.accent,
-                ),
-                buildPostChip(
-                  icon: post.isAnonymous
-                      ? Icons.visibility_off_outlined
-                      : Icons.badge_outlined,
-                  label: post.isAnonymous ? "Anonim" : "Açık kimlik",
-                ),
-              ],
-            ),
-            const SizedBox(height: 22),
-            buildDetailRow(
-              icon: Icons.access_time,
-              title: "Ne zaman?",
-              value: post.dateTimeText,
-            ),
-            buildDetailRow(
-              icon: Icons.person_search_outlined,
-              title: "Kişiyi nasıl hatırlıyor?",
-              value: post.description,
-            ),
-            buildDetailRow(
-              icon: Icons.edit_note,
-              title: "Kısa not",
-              value: post.note,
-            ),
-            buildDetailRow(
-              icon: Icons.palette_outlined,
-              title: "Görünüm",
-              value: post.personAppearance,
-            ),
-            buildDetailRow(
-              icon: Icons.badge_outlined,
-              title: "Ayırt edici özellikler",
-              value: post.personTraits,
-            ),
-            buildDetailRow(
-              icon: Icons.directions_car_outlined,
-              title: "Araç plakası",
-              value: post.vehiclePlate,
-            ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.backgroundSoft.withValues(alpha: 0.78),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const Text(
-                "Sağa kaydırırsan ilan sahibine istek gider. Sola kaydırırsan bu itirafı geçersin.",
-                style: TextStyle(
-                  color: AppColors.softText,
-                  fontSize: 13,
-                  height: 1.4,
-                  fontWeight: FontWeight.w600,
-                ),
+                  const SizedBox(height: 18),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      buildDetailRow(
+                        icon: Icons.access_time,
+                        title: "Ne zaman?",
+                        value: post.dateTimeText,
+                      ),
+                      buildDetailRow(
+                        icon: Icons.person_search_outlined,
+                        title: "Kişiyi nasıl hatırlıyor?",
+                        value: post.description,
+                      ),
+                      buildDetailRow(
+                        icon: Icons.palette_outlined,
+                        title: "Görünüm",
+                        value: post.personAppearance,
+                      ),
+                      buildDetailRow(
+                        icon: Icons.badge_outlined,
+                        title: "Ayırt edici özellikler",
+                        value: post.personTraits,
+                      ),
+                      buildDetailRow(
+                        icon: Icons.directions_car_outlined,
+                        title: "Araç plakası",
+                        value: post.vehiclePlate,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.background.withValues(alpha: 0.42),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Text(
+                      "Sağa kaydırırsan istek gider. Sola kaydırırsan bu itirafı geçersin.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.softText,
+                        fontSize: 13,
+                        height: 1.4,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -5674,7 +7159,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       children: [
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
             child: Dismissible(
               key: ValueKey("encounter_swipe_${post.id}"),
               direction: DismissDirection.horizontal,
@@ -5699,7 +7184,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
             ),
           ),
         ),
-        buildExploreEyeFooter(),
+        buildEncounterActions(currentItem),
       ],
     );
   }
@@ -5798,19 +7283,21 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   Widget buildPostChip({
     required IconData icon,
     required String label,
-    Color color = AppColors.secondary,
+    Color? color,
   }) {
+    final chipColor = color ?? AppColors.secondary;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
+        color: chipColor.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
+        border: Border.all(color: chipColor.withValues(alpha: 0.22)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: 15),
+          Icon(icon, color: chipColor, size: 15),
           const SizedBox(width: 6),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 220),
@@ -5818,7 +7305,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
               label,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: color,
+                color: chipColor,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -5859,12 +7346,12 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
         children: [
           Row(
             children: [
-              const Icon(Icons.location_on_outlined, color: AppColors.accent),
+              Icon(Icons.location_on_outlined, color: AppColors.accent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   post.place,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.text,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -5873,7 +7360,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
               ),
               if (currentUser != null && post.ownerId != currentUser.uid)
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, color: AppColors.softText),
+                  icon: Icon(Icons.more_vert, color: AppColors.softText),
                   onSelected: (value) {
                     if (value == "report") {
                       reportEncounterPost(post);
@@ -5899,7 +7386,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
           const SizedBox(height: 8),
           Text(
             "${post.dateTimeText} • ${formatCreatedAt(post.createdAt)}",
-            style: const TextStyle(color: AppColors.softText, fontSize: 14),
+            style: TextStyle(color: AppColors.softText, fontSize: 14),
           ),
           const SizedBox(height: 6),
           Row(
@@ -5907,7 +7394,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
               Expanded(
                 child: Text(
                   formatDistance(item.distanceMeters),
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.accent,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -5927,7 +7414,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
                       color: AppColors.accent.withValues(alpha: 0.35),
                     ),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
@@ -5952,16 +7439,12 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
           const SizedBox(height: 16),
           Text(
             post.description,
-            style: const TextStyle(
-              color: AppColors.text,
-              fontSize: 15,
-              height: 1.5,
-            ),
+            style: TextStyle(color: AppColors.text, fontSize: 15, height: 1.5),
           ),
           const SizedBox(height: 10),
           Text(
             post.note,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.softText,
               fontSize: 14,
               height: 1.5,
@@ -5982,16 +7465,12 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.location_off_outlined,
-            color: AppColors.accent,
-            size: 56,
-          ),
+          Icon(Icons.location_off_outlined, color: AppColors.accent, size: 56),
           const SizedBox(height: 18),
           Text(
             error.toString().replaceAll("Exception: ", ""),
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.softText,
               fontSize: 16,
               height: 1.5,
@@ -6025,14 +7504,14 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
                   color: AppColors.accent.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(24),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.location_city_outlined,
                   color: AppColors.accent,
                   size: 38,
                 ),
               ),
               const SizedBox(height: 18),
-              const Text(
+              Text(
                 "Pilot bölge Ankara",
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -6042,7 +7521,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
                 ),
               ),
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 "Şimdilik keşif ve itiraf bırakma akışı sadece Ankara içinde açık. Diğer şehirleri sonra ekleyeceğiz.",
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -6079,7 +7558,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
+          return Center(
             child: CircularProgressIndicator(color: AppColors.accent),
           );
         }
@@ -6091,7 +7570,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
               child: Text(
                 "İlanlar yüklenirken hata oluştu:\n${snapshot.error}",
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.softText),
+                style: TextStyle(color: AppColors.softText),
               ),
             ),
           );
@@ -6104,7 +7583,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
         );
 
         if (isLoadingDismissedPosts) {
-          return const Center(
+          return Center(
             child: CircularProgressIndicator(color: AppColors.accent),
           );
         }
@@ -6148,7 +7627,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
             future: positionFuture,
             builder: (context, positionSnapshot) {
               if (positionSnapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
+                return Center(
                   child: CircularProgressIndicator(color: AppColors.accent),
                 );
               }

@@ -1,0 +1,43 @@
+warning: in the working copy of 'android/app/src/main/AndroidManifest.xml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'firestore.rules', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ios/Runner/Info.plist', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/app_theme.dart', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/main.dart', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/models/app_user_profile.dart', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/services/profile_service.dart', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'linux/runner/my_application.cc', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'pubspec.lock', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'pubspec.yaml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'test/app_helpers_test.dart', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/account-deletion.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/child-safety.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/community-guidelines.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/index.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/manifest.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/privacy-policy.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'windows/flutter/generated_plugin_registrant.cc', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'windows/flutter/generated_plugins.cmake', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'windows/runner/Runner.rc', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'windows/runner/main.cpp', LF will be replaced by CRLF the next time Git touches it
+ android/app/src/main/AndroidManifest.xml       |    5 [32m+[m[31m-[m
+ firestore.rules                                |   10 [32m+[m[31m-[m
+ ios/Runner/Info.plist                          |   12 [32m+[m[31m-[m
+ lib/app_theme.dart                             |  217 [32m+[m[31m-[m
+ lib/main.dart                                  | 3059 [32m++++++++++++++++++[m[31m------[m
+ lib/models/app_user_profile.dart               |    3 [32m+[m
+ lib/services/profile_service.dart              |    1 [32m+[m
+ linux/runner/my_application.cc                 |    6 [32m+[m[31m-[m
+ pubspec.lock                                   |   48 [32m+[m
+ pubspec.yaml                                   |    5 [32m+[m[31m-[m
+ test/app_helpers_test.dart                     |   16 [32m+[m
+ web/account-deletion.html                      |   10 [32m+[m[31m-[m
+ web/child-safety.html                          |   10 [32m+[m[31m-[m
+ web/community-guidelines.html                  |    8 [32m+[m[31m-[m
+ web/index.html                                 |    8 [32m+[m[31m-[m
+ web/manifest.json                              |    8 [32m+[m[31m-[m
+ web/privacy-policy.html                        |   10 [32m+[m[31m-[m
+ windows/flutter/generated_plugin_registrant.cc |    3 [32m+[m
+ windows/flutter/generated_plugins.cmake        |    1 [32m+[m
+ windows/runner/Runner.rc                       |    6 [32m+[m[31m-[m
+ windows/runner/main.cpp                        |    4 [32m+[m[31m-[m
+ 21 files changed, 2568 insertions(+), 882 deletions(-)

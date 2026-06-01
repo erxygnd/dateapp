@@ -49,6 +49,7 @@ Future<AppUserProfile> loadUserProfile(User user) async {
     "gender": data["gender"],
     "bio": data["bio"] ?? "",
     "email": data["email"] ?? user.email,
+    "phoneNumber": data["phoneNumber"],
     "photoUrls": data["photoUrls"] ?? const [],
   }, user.uid);
 }

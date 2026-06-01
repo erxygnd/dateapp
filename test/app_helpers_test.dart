@@ -26,6 +26,22 @@ void main() {
       expect(isValidUsername('er'), isFalse);
       expect(isValidUsername('eray-24'), isFalse);
     });
+
+    test('validates e-mail, phone and strong passwords', () {
+      expect(validateEmailAddress('eray@example.com'), isNull);
+      expect(validateEmailAddress('eray@example'), 'Geçerli bir mail gir');
+      expect(validatePhoneNumber('0532 123 45 67'), isNull);
+      expect(validatePhoneNumber('12345'), 'Geçerli bir telefon numarası gir');
+      expect(validateRegisterPassword('Güvenli1!'), isNull);
+      expect(
+        validateRegisterPassword('guvenli1!'),
+        'Şifre en az 1 büyük harf içermeli',
+      );
+      expect(
+        validateRegisterPassword('Guvenli12'),
+        'Şifre en az 1 noktalama işareti içermeli',
+      );
+    });
   });
 
   test('buildChatId returns a stable id independent of argument order', () {

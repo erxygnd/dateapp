@@ -24,6 +24,12 @@ service cloud.firestore {
         (data.postOwnerId == uid() || data.interestedUserId == uid());
     }
 
+    // Istegi atan kisi, kendi sabit requestId'sini yoklayabilsin.
+    // Kod requestId'yi "{postId}_{uid}" olarak kuruyor.
+    function requestIdBelongsToRequester(requestId) {
+      return signedIn() && requestId.matches('^.*_' + uid() + '$');
+    }
+
     // Chat'i sadece o sohbetin iki katilimcisindan biri okuyup guncelleyebilsin.
     function chatParticipant(data) {
       return signedIn() &&
@@ -93,7 +99,9 @@ service cloud.firestore {
 
     match /interest_requests/{requestId} {
       // Istegi sadece iki taraf okuyabilir: ilan sahibi ve istegi atan kisi.
-      allow read: if requestParticipant(resource.data);
+      allow get: if requestParticipant(resource.data) ||
+        requestIdBelongsToRequester(requestId);
+      allow list: if requestParticipant(resource.data);
 
       // Istek olusturan kisi interestedUserId olarak kendini yazmak zorunda.
       allow create: if signedIn() &&

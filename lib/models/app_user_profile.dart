@@ -9,6 +9,7 @@ class AppUserProfile {
   final String? gender;
   final String bio;
   final String? email;
+  final String? phoneNumber;
   final List<String> photoUrls;
 
   AppUserProfile({
@@ -20,6 +21,7 @@ class AppUserProfile {
     required this.gender,
     required this.bio,
     required this.email,
+    required this.phoneNumber,
     required this.photoUrls,
   });
 
@@ -39,6 +41,7 @@ class AppUserProfile {
       gender: data["gender"]?.toString(),
       bio: data["bio"] ?? "",
       email: data["email"]?.toString(),
+      phoneNumber: data["phoneNumber"]?.toString(),
       photoUrls: photoData is List
           ? photoData.map((item) => item.toString()).toList()
           : const [],

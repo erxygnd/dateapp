@@ -1,60 +1,184 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
-class AppColors {
-  static const Color background = Color(0xFFFFF7F1);
-  static const Color backgroundSoft = Color(0xFFFFE7D7);
-  static const Color card = Color(0xFAFFFFFF);
-  static const Color cardSolid = Color(0xFFFFFFFF);
-  static const Color inputFill = Color(0xFFFFFBF7);
-  static const Color border = Color(0x2B4B1F6F);
-  static const Color accent = Color(0xFFFF5A1F);
-  static const Color accentDark = Color(0xFFE44710);
-  static const Color secondary = Color(0xFF23B64F);
-  static const Color violet = Color(0xFF4B1F78);
-  static const Color violetDark = Color(0xFF26113D);
-  static const Color text = Color(0xFF211626);
-  static const Color softText = Color(0xFF756571);
-  static const Color success = Color(0xFF22C55E);
-  static const Color danger = Color(0xFFDC2626);
+enum AppThemeChoice {
+  light,
+  dark;
+
+  String get firestoreValue => this == AppThemeChoice.dark ? "dark" : "light";
+
+  static AppThemeChoice fromValue(Object? value) {
+    return value == "light" ? AppThemeChoice.light : AppThemeChoice.dark;
+  }
 }
 
-ThemeData buildAppTheme() {
+final ValueNotifier<AppThemeChoice> appThemeController =
+    ValueNotifier<AppThemeChoice>(AppThemeChoice.dark);
+
+class _AppColorPalette {
+  final Color background;
+  final Color backgroundSoft;
+  final Color card;
+  final Color cardSolid;
+  final Color inputFill;
+  final Color border;
+  final Color accent;
+  final Color accentDark;
+  final Color secondary;
+  final Color violet;
+  final Color violetDark;
+  final Color text;
+  final Color softText;
+  final Color success;
+  final Color danger;
+  final Brightness brightness;
+
+  const _AppColorPalette({
+    required this.background,
+    required this.backgroundSoft,
+    required this.card,
+    required this.cardSolid,
+    required this.inputFill,
+    required this.border,
+    required this.accent,
+    required this.accentDark,
+    required this.secondary,
+    required this.violet,
+    required this.violetDark,
+    required this.text,
+    required this.softText,
+    required this.success,
+    required this.danger,
+    required this.brightness,
+  });
+}
+
+class AppColors {
+  static const _light = _AppColorPalette(
+    background: Color(0xFFFFF4F8),
+    backgroundSoft: Color(0xFFFFE4EF),
+    card: Color(0xFAFFFFFF),
+    cardSolid: Color(0xFFFFFFFF),
+    inputFill: Color(0xFFFFF8FB),
+    border: Color(0x2B8A1E4D),
+    accent: Color(0xFFF30A68),
+    accentDark: Color(0xFFC80755),
+    secondary: Color(0xFFFF4D93),
+    violet: Color(0xFF8A1E4D),
+    violetDark: Color(0xFF211020),
+    text: Color(0xFF24111F),
+    softText: Color(0xFF7A6575),
+    success: Color(0xFF22C55E),
+    danger: Color(0xFFE11D48),
+    brightness: Brightness.light,
+  );
+
+  static const _dark = _AppColorPalette(
+    background: Color(0xFF120D1A),
+    backgroundSoft: Color(0xFF211020),
+    card: Color(0xF22A2333),
+    cardSolid: Color(0xFF34283D),
+    inputFill: Color(0xFF211B2B),
+    border: Color(0x66433246),
+    accent: Color(0xFFF30A68),
+    accentDark: Color(0xFFC80755),
+    secondary: Color(0xFFFF4D93),
+    violet: Color(0xFF8A1E4D),
+    violetDark: Color(0xFF171824),
+    text: Color(0xFFF7EAF1),
+    softText: Color(0xFFA99AAA),
+    success: Color(0xFF35D978),
+    danger: Color(0xFFFF5C8A),
+    brightness: Brightness.dark,
+  );
+
+  static _AppColorPalette get _palette =>
+      appThemeController.value == AppThemeChoice.dark ? _dark : _light;
+
+  static bool get isDark => _palette.brightness == Brightness.dark;
+  static Color get background => _palette.background;
+  static Color get backgroundSoft => _palette.backgroundSoft;
+  static Color get card => _palette.card;
+  static Color get cardSolid => _palette.cardSolid;
+  static Color get inputFill => _palette.inputFill;
+  static Color get border => _palette.border;
+  static Color get accent => _palette.accent;
+  static Color get accentDark => _palette.accentDark;
+  static Color get secondary => _palette.secondary;
+  static Color get violet => _palette.violet;
+  static Color get violetDark => _palette.violetDark;
+  static Color get text => _palette.text;
+  static Color get softText => _palette.softText;
+  static Color get success => _palette.success;
+  static Color get danger => _palette.danger;
+}
+
+ThemeData buildAppTheme([AppThemeChoice? choice]) {
+  final palette = choice == AppThemeChoice.dark
+      ? AppColors._dark
+      : AppColors._light;
+
   return ThemeData(
     useMaterial3: true,
     fontFamily: 'Roboto',
-    scaffoldBackgroundColor: AppColors.background,
+    scaffoldBackgroundColor: palette.background,
     colorScheme:
         ColorScheme.fromSeed(
-          seedColor: AppColors.accent,
-          brightness: Brightness.light,
+          seedColor: palette.accent,
+          brightness: palette.brightness,
         ).copyWith(
-          primary: AppColors.accent,
-          secondary: AppColors.secondary,
-          tertiary: AppColors.violet,
-          surface: AppColors.cardSolid,
-          onSurface: AppColors.text,
+          primary: palette.accent,
+          secondary: palette.secondary,
+          tertiary: palette.violet,
+          surface: palette.cardSolid,
+          onSurface: palette.text,
         ),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.transparent,
-      foregroundColor: AppColors.text,
+    appBarTheme: AppBarTheme(
+      backgroundColor: palette.brightness == Brightness.dark
+          ? const Color(0xFF211020)
+          : Colors.transparent,
+      foregroundColor: palette.text,
       elevation: 0,
       centerTitle: false,
       titleTextStyle: TextStyle(
-        color: AppColors.text,
+        color: palette.text,
         fontSize: 20,
         fontWeight: FontWeight.w800,
       ),
     ),
     snackBarTheme: SnackBarThemeData(
-      backgroundColor: AppColors.text,
-      contentTextStyle: const TextStyle(color: Colors.white),
+      backgroundColor: palette.text,
+      contentTextStyle: TextStyle(color: palette.background),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: AppColors.accent),
+      style: TextButton.styleFrom(foregroundColor: palette.accent),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(style: mainButtonStyle()),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: palette.inputFill,
+      iconColor: palette.secondary,
+      prefixIconColor: palette.secondary,
+      suffixIconColor: palette.softText,
+      labelStyle: TextStyle(color: palette.softText),
+      hintStyle: TextStyle(color: palette.softText.withValues(alpha: 0.68)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: palette.border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: palette.accent, width: 1.4),
+      ),
+    ),
+    cardTheme: CardThemeData(
+      color: palette.card,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+    dividerTheme: DividerThemeData(color: palette.border),
   );
 }
 
@@ -76,17 +200,17 @@ Widget appLogo({double size = 72, Color? color}) {
     clipBehavior: Clip.antiAlias,
     child: RepaintBoundary(
       child: CustomPaint(
-        painter: _PiyasaIconPainter(avatarColor: color),
+        painter: _FildirIconPainter(avatarColor: color),
         child: SizedBox.square(dimension: size),
       ),
     ),
   );
 }
 
-class _PiyasaIconPainter extends CustomPainter {
+class _FildirIconPainter extends CustomPainter {
   final Color? avatarColor;
 
-  const _PiyasaIconPainter({required this.avatarColor});
+  const _FildirIconPainter({required this.avatarColor});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -102,10 +226,10 @@ class _PiyasaIconPainter extends CustomPainter {
     canvas.drawRRect(
       rrect,
       Paint()
-        ..shader = const LinearGradient(
+        ..shader = LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFFFF6A1F), AppColors.accentDark],
+          colors: [AppColors.secondary, AppColors.accentDark],
         ).createShader(rect),
     );
 
@@ -237,7 +361,7 @@ class _PiyasaIconPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PiyasaIconPainter oldDelegate) {
+  bool shouldRepaint(covariant _FildirIconPainter oldDelegate) {
     return oldDelegate.avatarColor != avatarColor;
   }
 }
@@ -248,9 +372,9 @@ ButtonStyle mainButtonStyle() {
     foregroundColor: Colors.white,
     disabledBackgroundColor: AppColors.accent.withValues(alpha: 0.28),
     disabledForegroundColor: Colors.white.withValues(alpha: 0.72),
-    elevation: 8,
-    shadowColor: AppColors.accent.withValues(alpha: 0.20),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    elevation: 10,
+    shadowColor: AppColors.accent.withValues(alpha: 0.34),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
   );
 }
 
@@ -265,25 +389,26 @@ InputDecoration baseInputDecoration({
     prefixIcon: Icon(icon),
     filled: true,
     fillColor: AppColors.inputFill,
-    labelStyle: const TextStyle(color: AppColors.softText),
+    labelStyle: TextStyle(color: AppColors.softText),
     hintStyle: TextStyle(color: AppColors.softText.withValues(alpha: 0.68)),
     prefixIconColor: AppColors.secondary,
+    suffixIconColor: AppColors.softText,
     border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(color: AppColors.border),
+      borderSide: BorderSide(color: AppColors.border),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(color: AppColors.accent, width: 1.4),
+      borderSide: BorderSide(color: AppColors.accent, width: 1.4),
     ),
     errorBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(color: AppColors.danger),
+      borderSide: BorderSide(color: AppColors.danger),
     ),
     focusedErrorBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(color: AppColors.danger),
+      borderSide: BorderSide(color: AppColors.danger),
     ),
   );
 }
