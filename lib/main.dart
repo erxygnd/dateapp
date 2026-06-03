@@ -346,7 +346,10 @@ Future<Position> getCurrentPositionSafely() async {
   }
 
   return Geolocator.getCurrentPosition(
-    locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.medium,
+      timeLimit: Duration(seconds: 12),
+    ),
   );
 }
 
@@ -541,6 +544,26 @@ String? validateRegisterPassword(String? value) {
 final Map<String, ImageProvider<Object>> profilePhotoImageProviderCache = {};
 final Map<String, Uint8List?> embeddedProfilePhotoBytesCache = {};
 
+void trimProfilePhotoCaches() {
+  while (profilePhotoImageProviderCache.length > profilePhotoMemoryCacheLimit) {
+    profilePhotoImageProviderCache.remove(
+      profilePhotoImageProviderCache.keys.first,
+    );
+  }
+
+  while (embeddedProfilePhotoBytesCache.length > profilePhotoMemoryCacheLimit) {
+    embeddedProfilePhotoBytesCache.remove(
+      embeddedProfilePhotoBytesCache.keys.first,
+    );
+  }
+}
+
+T cacheProfilePhotoValue<T>(Map<String, T> cache, String source, T value) {
+  cache[source] = value;
+  trimProfilePhotoCaches();
+  return value;
+}
+
 Future<List<String>> prepareProfilePhotoSources({
   required List<LocalProfilePhoto> photos,
 }) async {
@@ -560,17 +583,18 @@ Uint8List? embeddedProfilePhotoBytes(String source) {
   }
 
   if (!isEmbeddedProfilePhoto(source)) {
-    embeddedProfilePhotoBytesCache[source] = null;
-    return null;
+    return cacheProfilePhotoValue(embeddedProfilePhotoBytesCache, source, null);
   }
 
   try {
     final bytes = base64Decode(source.substring(profilePhotoDataPrefix.length));
-    embeddedProfilePhotoBytesCache[source] = bytes;
-    return bytes;
+    return cacheProfilePhotoValue(
+      embeddedProfilePhotoBytesCache,
+      source,
+      bytes,
+    );
   } on FormatException {
-    embeddedProfilePhotoBytesCache[source] = null;
-    return null;
+    return cacheProfilePhotoValue(embeddedProfilePhotoBytesCache, source, null);
   }
 }
 
@@ -596,7 +620,7 @@ Widget buildSavedProfilePhotoImage(String source) {
     baseProvider,
     width: profilePhotoPreviewCacheSize,
   );
-  profilePhotoImageProviderCache[source] = provider;
+  cacheProfilePhotoValue(profilePhotoImageProviderCache, source, provider);
 
   return Image(
     image: provider,
@@ -1814,11 +1838,9 @@ class WelcomePage extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       bottomNavigationBar: PremiumBottomNav(
-        onProfile: () => openPage(context, const ProfilePage()),
-        onRequests: () => openPage(context, const IncomingRequestsPage()),
         onChats: () => openPage(context, const ChatListPage()),
         onBrowse: () => openPage(context, const BrowseEncountersPage()),
-        onSettings: () => openPage(context, const SettingsPage()),
+        onProfile: () => openPage(context, const ProfilePage()),
       ),
       body: AppBackdrop(
         child: SafeArea(
@@ -1840,10 +1862,6 @@ class WelcomePage extends StatelessWidget {
                           fontWeight: FontWeight.w900,
                         ),
                       ),
-                    ),
-                    _RoundIconButton(
-                      icon: Icons.settings_outlined,
-                      onPressed: () => openPage(context, const SettingsPage()),
                     ),
                   ],
                 ),
@@ -2325,28 +2343,6 @@ class _AppTutorialPageState extends State<AppTutorialPage> {
   }
 }
 
-class _RoundIconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  const _RoundIconButton({required this.icon, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipOval(
-      child: IconButton(
-        onPressed: onPressed,
-        icon: Icon(icon),
-        color: AppColors.text,
-        style: IconButton.styleFrom(
-          backgroundColor: AppColors.cardSolid.withValues(alpha: 0.82),
-          side: BorderSide(color: AppColors.border),
-        ),
-      ),
-    );
-  }
-}
-
 class _MetricChip extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -2511,60 +2507,148 @@ class _EmptyEncounterSearchState extends State<_EmptyEncounterSearch>
 }
 
 class PremiumBottomNav extends StatelessWidget {
-  final VoidCallback onProfile;
-  final VoidCallback onRequests;
   final VoidCallback onChats;
   final VoidCallback onBrowse;
-  final VoidCallback onSettings;
+  final VoidCallback onProfile;
 
   const PremiumBottomNav({
     super.key,
-    required this.onProfile,
-    required this.onRequests,
     required this.onChats,
     required this.onBrowse,
-    required this.onSettings,
+    required this.onProfile,
   });
+
+  int unreadChatCountForUser(
+    QuerySnapshot<Map<String, dynamic>>? snapshot,
+    String userId,
+  ) {
+    if (snapshot == null) {
+      return 0;
+    }
+
+    var total = 0;
+
+    for (final doc in snapshot.docs) {
+      final counts = doc.data()["unreadCounts"];
+
+      if (counts is Map) {
+        final value = counts[userId];
+
+        if (value is int) {
+          total += value;
+        } else {
+          total += int.tryParse(value?.toString() ?? "") ?? 0;
+        }
+      }
+    }
+
+    return total;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
     return SafeArea(
-      minimum: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-      child: GlassPanel(
-        radius: 18,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-        color: AppColors.isDark
-            ? const Color(0xF21B1525)
-            : AppColors.card.withValues(alpha: 0.92),
-        child: Row(
-          children: [
-            _NavButton(
-              icon: Icons.account_circle_outlined,
-              label: "Profil",
-              onPressed: onProfile,
+      minimum: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: user == null
+            ? null
+            : FirebaseFirestore.instance
+                  .collection("chats")
+                  .where("participants", arrayContains: user.uid)
+                  .limit(chatListPageSize)
+                  .snapshots(),
+        builder: (context, snapshot) {
+          final unreadCount = user == null
+              ? 0
+              : unreadChatCountForUser(snapshot.data, user.uid);
+
+          return GlassPanel(
+            radius: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            color: AppColors.isDark
+                ? const Color(0xF21A1424)
+                : AppColors.card.withValues(alpha: 0.94),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                _NavButton(
+                  icon: Icons.chat_bubble_outline,
+                  label: "Sohbet",
+                  onPressed: onChats,
+                  badgeCount: unreadCount,
+                ),
+                _DiscoverNavButton(onPressed: onBrowse),
+                _NavButton(
+                  icon: Icons.person_outline,
+                  label: "Profil",
+                  onPressed: onProfile,
+                ),
+              ],
             ),
-            _NavButton(
-              icon: Icons.style_outlined,
-              label: "İstek",
-              onPressed: onRequests,
-            ),
-            _NavButton(
-              icon: Icons.chat_bubble_outline,
-              label: "Sohbet",
-              onPressed: onChats,
-            ),
-            _NavButton(
-              icon: Icons.explore_outlined,
-              label: "Keşfet",
-              onPressed: onBrowse,
-              active: true,
-            ),
-            _NavButton(
-              icon: Icons.settings_outlined,
-              label: "Ayar",
-              onPressed: onSettings,
-            ),
-          ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DiscoverNavButton extends StatelessWidget {
+  final VoidCallback onPressed;
+
+  const _DiscoverNavButton({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    const discoverColor = Color(0xFF25E6C8);
+
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(26),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 1),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: discoverColor.withValues(alpha: 0.16),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: discoverColor.withValues(alpha: 0.36),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: discoverColor.withValues(alpha: 0.16),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.explore_rounded,
+                  color: discoverColor,
+                  size: 31,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                "Keşfet",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3390,18 +3474,18 @@ class _NavButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onPressed;
-  final bool active;
+  final int badgeCount;
 
   const _NavButton({
     required this.icon,
     required this.label,
     required this.onPressed,
-    this.active = false,
+    this.badgeCount = 0,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = active ? AppColors.accent : AppColors.softText;
+    final color = AppColors.softText;
 
     return Expanded(
       child: InkWell(
@@ -3411,15 +3495,47 @@ class _NavButton extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: active
-                ? AppColors.accent.withValues(alpha: 0.10)
-                : Colors.transparent,
+            color: Colors.transparent,
             borderRadius: BorderRadius.circular(999),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color, size: 22),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(icon, color: color, size: 24),
+                  if (badgeCount > 0)
+                    Positioned(
+                      right: -10,
+                      top: -8,
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          minWidth: 20,
+                          minHeight: 20,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        decoration: BoxDecoration(
+                          color: AppColors.accent,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: AppColors.cardSolid,
+                            width: 1.5,
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          badgeCount > 99 ? "99+" : badgeCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(height: 3),
               Text(
                 label,
@@ -3972,6 +4088,18 @@ class _ProfilePageState extends State<ProfilePage> {
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.text,
         title: const Text("Profilim"),
+        actions: [
+          IconButton(
+            tooltip: "Ayarlar",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              );
+            },
+            icon: const Icon(Icons.settings_outlined),
+          ),
+        ],
       ),
       body: SafeArea(
         child: isLoading
@@ -4665,6 +4793,7 @@ class IncomingRequestsPage extends StatelessWidget {
         requesterId: requesterName,
       },
       "blockedBy": [],
+      "unreadCounts": {user.uid: 0, requesterId: 0},
       // Ilk dakikalarda fotograf gondermeyi kilitleyerek kotuye kullanimi azaltiriz.
       "photoUnlockAt": Timestamp.fromDate(
         chatOpenedAt.add(chatPhotoLockDuration),
@@ -4889,6 +5018,8 @@ class IncomingRequestsPage extends StatelessWidget {
               stream: FirebaseFirestore.instance
                   .collection("interest_requests")
                   .where("postOwnerId", isEqualTo: user.uid)
+                  .where("status", isEqualTo: "pending")
+                  .limit(incomingRequestPageSize)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -4897,9 +5028,7 @@ class IncomingRequestsPage extends StatelessWidget {
                   );
                 }
 
-                final docs = (snapshot.data?.docs ?? [])
-                    .where((doc) => doc.data()["status"] == "pending")
-                    .toList();
+                final docs = snapshot.data?.docs ?? [];
 
                 if (docs.isEmpty) {
                   return ListView(
@@ -4963,6 +5092,7 @@ class ChatListPage extends StatelessWidget {
               stream: FirebaseFirestore.instance
                   .collection("chats")
                   .where("participants", arrayContains: user.uid)
+                  .limit(chatListPageSize)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -5137,46 +5267,58 @@ class _PhotoLockCountdownState extends State<PhotoLockCountdown> {
 class _ChatPageState extends State<ChatPage> {
   final messageController = TextEditingController();
   final ImagePicker imagePicker = ImagePicker();
-  Timer? chatTimer;
+  late final DocumentReference<Map<String, dynamic>> chatRef;
+  late final CollectionReference<Map<String, dynamic>> messagesRef;
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> chatStream;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> messagesStream;
+  Timer? recordingTimer;
   bool isSending = false;
   bool isRecordingVoice = false;
   int recordingSeconds = 0;
+  String? lastAutoReadMessageId;
 
   @override
   void initState() {
     super.initState();
-    chatTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+    chatRef = FirebaseFirestore.instance.collection("chats").doc(widget.chatId);
+    messagesRef = chatRef.collection("messages");
+    chatStream = chatRef.snapshots();
+    messagesStream = messagesRef
+        .orderBy("createdAt", descending: true)
+        .limit(chatMessagePageSize)
+        .snapshots();
+    unawaited(markChatRead());
+  }
+
+  void startRecordingTimer() {
+    recordingTimer?.cancel();
+    recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || !isRecordingVoice) {
         return;
       }
 
-      recordingSeconds++;
+      setState(() {
+        recordingSeconds++;
+      });
 
       if (recordingSeconds >= voiceRecordingMaxDuration.inSeconds) {
         // Ses kaydi cok uzamasin diye sure dolunca otomatik durduruyoruz.
-        isRecordingVoice = false;
+        recordingTimer?.cancel();
+        recordingTimer = null;
         unawaited(stopVoiceRecording());
       }
-
-      setState(() {});
     });
   }
 
   @override
   void dispose() {
-    chatTimer?.cancel();
+    recordingTimer?.cancel();
     if (isRecordingVoice) {
       unawaited(stopVoiceRecording(sendAfterStop: false));
     }
     messageController.dispose();
     super.dispose();
   }
-
-  CollectionReference<Map<String, dynamic>> get messagesRef => FirebaseFirestore
-      .instance
-      .collection("chats")
-      .doc(widget.chatId)
-      .collection("messages");
 
   DateTime? photoUnlockDate(Map<String, dynamic> chatData) {
     // Yeni sohbetlerde kilit zamani photoUnlockAt alaninda tutulur.
@@ -5211,6 +5353,18 @@ class _ChatPageState extends State<ChatPage> {
     return photoLockRemaining(chatData) == Duration.zero;
   }
 
+  Future<void> markChatRead() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return;
+    }
+
+    await chatRef
+        .set({"unreadCounts.${user.uid}": 0}, SetOptions(merge: true))
+        .catchError((_) {});
+  }
+
   String lastMessagePreview(String type, String fallback) {
     switch (type) {
       case "image":
@@ -5222,15 +5376,15 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  Future<void> updateChatPreview(String lastMessage) {
+  Future<void> updateChatPreview(String lastMessage, User sender) {
     // Chat listesindeki son mesaj yazisi buradan guncellenir.
-    return FirebaseFirestore.instance
-        .collection("chats")
-        .doc(widget.chatId)
-        .set({
-          "lastMessage": lastMessage,
-          "lastMessageAt": FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+    return chatRef.set({
+      "lastMessage": lastMessage,
+      "lastMessageAt": FieldValue.serverTimestamp(),
+      "lastSenderId": sender.uid,
+      "unreadCounts.${sender.uid}": 0,
+      "unreadCounts.${widget.otherUserId}": FieldValue.increment(1),
+    }, SetOptions(merge: true));
   }
 
   Future<void> sendMessage(Map<String, dynamic> chatData) async {
@@ -5263,7 +5417,7 @@ class _ChatPageState extends State<ChatPage> {
         "createdAt": FieldValue.serverTimestamp(),
       });
 
-      await updateChatPreview(text);
+      await updateChatPreview(text, user);
 
       if (!mounted) {
         return;
@@ -5325,7 +5479,7 @@ class _ChatPageState extends State<ChatPage> {
         "createdAt": FieldValue.serverTimestamp(),
       });
 
-      await updateChatPreview(lastMessagePreview("image", ""));
+      await updateChatPreview(lastMessagePreview("image", ""), user);
     } on TimeoutException {
       showMessage("Fotoğraf hazırlanırken çok uzun sürdü. Tekrar dene.");
     } catch (e) {
@@ -5361,6 +5515,7 @@ class _ChatPageState extends State<ChatPage> {
         isRecordingVoice = true;
         recordingSeconds = 0;
       });
+      startRecordingTimer();
     } on MissingPluginException {
       showMessage("Ses kaydı bu cihazda desteklenmiyor.");
     } on PlatformException catch (e) {
@@ -5377,6 +5532,8 @@ class _ChatPageState extends State<ChatPage> {
         .toInt();
 
     try {
+      recordingTimer?.cancel();
+      recordingTimer = null;
       // Native taraf kaydi durdurur ve bize base64/dataUrl olarak geri verir.
       final dataUrl = await appMediaChannel.invokeMethod<String>(
         "stopVoiceRecording",
@@ -5405,7 +5562,7 @@ class _ChatPageState extends State<ChatPage> {
         "createdAt": FieldValue.serverTimestamp(),
       });
 
-      await updateChatPreview(lastMessagePreview("voice", ""));
+      await updateChatPreview(lastMessagePreview("voice", ""), user);
     } on MissingPluginException {
       showMessage("Ses kaydı bu cihazda desteklenmiyor.");
     } on PlatformException catch (e) {
@@ -5413,6 +5570,8 @@ class _ChatPageState extends State<ChatPage> {
     } catch (e) {
       showMessage("Ses kaydı gönderilemedi: $e");
     } finally {
+      recordingTimer?.cancel();
+      recordingTimer = null;
       if (mounted) {
         setState(() {
           isRecordingVoice = false;
@@ -5445,13 +5604,10 @@ class _ChatPageState extends State<ChatPage> {
 
     // Engeli hem chat belgesine hem de blocks koleksiyonuna yaziyoruz.
     // Chat belgesi mesaj atmayi keser, blocks koleksiyonu listelerde filtreleme yapar.
-    await FirebaseFirestore.instance.collection("chats").doc(widget.chatId).set(
-      {
-        "blockedBy": FieldValue.arrayUnion([user.uid]),
-        "blockedAt": FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+    await chatRef.set({
+      "blockedBy": FieldValue.arrayUnion([user.uid]),
+      "blockedAt": FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
 
     await FirebaseFirestore.instance
         .collection("blocks")
@@ -5767,10 +5923,7 @@ class _ChatPageState extends State<ChatPage> {
     final user = FirebaseAuth.instance.currentUser;
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection("chats")
-          .doc(widget.chatId)
-          .snapshots(),
+      stream: chatStream,
       builder: (context, chatSnapshot) {
         final chatData = chatSnapshot.data?.data() ?? {};
 
@@ -5813,9 +5966,7 @@ class _ChatPageState extends State<ChatPage> {
                         children: [
                           buildChatLogoBackground(),
                           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                            stream: messagesRef
-                                .orderBy("createdAt")
-                                .snapshots(),
+                            stream: messagesStream,
                             builder: (context, snapshot) {
                               if (snapshot.connectionState ==
                                   ConnectionState.waiting) {
@@ -5828,8 +5979,21 @@ class _ChatPageState extends State<ChatPage> {
 
                               final docs = snapshot.data?.docs ?? [];
 
+                              if (docs.isNotEmpty) {
+                                final latestDoc = docs.first;
+                                final latestData = latestDoc.data();
+
+                                if (latestDoc.id != lastAutoReadMessageId &&
+                                    latestData["senderId"] != user.uid) {
+                                  lastAutoReadMessageId = latestDoc.id;
+                                  unawaited(markChatRead());
+                                }
+                              }
+
                               return ListView.builder(
                                 padding: const EdgeInsets.all(16),
+                                reverse: true,
+                                cacheExtent: 420,
                                 itemCount: docs.length,
                                 itemBuilder: (context, index) {
                                   final data = docs[index].data();
@@ -6164,6 +6328,7 @@ class BrowseEncountersPage extends StatefulWidget {
 
 class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   late Future<Position> positionFuture;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> encountersStream;
   double radiusKm = 5;
   Set<String> blockedUserIds = {};
   Set<String> dismissedPostIds = {};
@@ -6173,6 +6338,11 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   void initState() {
     super.initState();
     positionFuture = getCurrentPositionSafely();
+    encountersStream = FirebaseFirestore.instance
+        .collection("encounters")
+        .orderBy("createdAt", descending: true)
+        .limit(encounterFeedPageSize)
+        .snapshots();
     unawaited(loadBlockedUsers());
     unawaited(loadDismissedPosts());
   }
@@ -6453,6 +6623,85 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void openDiscoverPage(Widget page) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+  }
+
+  Widget buildDiscoverShortcut({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onPressed,
+        child: Container(
+          height: 72,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: color.withValues(alpha: 0.24)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildDiscoverShortcuts() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      child: GlassPanel(
+        radius: 22,
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            buildDiscoverShortcut(
+              icon: Icons.style_outlined,
+              label: "İstekler",
+              color: AppColors.secondary,
+              onPressed: () => openDiscoverPage(const IncomingRequestsPage()),
+            ),
+            const SizedBox(width: 10),
+            buildDiscoverShortcut(
+              icon: Icons.add_location_alt_outlined,
+              label: "İtiraf Bırak",
+              color: const Color(0xFF25E6C8),
+              onPressed: () => openDiscoverPage(const CreateEncounterPage()),
+            ),
+            const SizedBox(width: 10),
+            buildDiscoverShortcut(
+              icon: Icons.auto_stories_outlined,
+              label: "İtiraflarım",
+              color: AppColors.accent,
+              onPressed: () => openDiscoverPage(const MyEncountersPage()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String formatDistance(double meters) {
     if (meters < 1000) {
       return "${meters.round()} m yakınında";
@@ -6533,6 +6782,7 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     return nearbyPosts
         .where((item) => !dismissedPostIds.contains(item.post.id))
         .where((item) => item.post.ownerId != user?.uid)
+        .take(swipeDeckLookaheadCount)
         .toList(growable: false);
   }
 
@@ -7178,8 +7428,10 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
                 icon: Icons.close,
                 label: "Geç",
               ),
-              child: SizedBox.expand(
-                child: buildSwipeEncounterCard(currentItem),
+              child: RepaintBoundary(
+                child: SizedBox.expand(
+                  child: buildSwipeEncounterCard(currentItem),
+                ),
               ),
             ),
           ),
@@ -7549,13 +7801,8 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
 
   Widget buildPostsList(Position currentPosition) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      // Firestore'dan son 100 ilani canli dinliyoruz.
-      // Sonra asagida mesafeye gore kendi cihazimizda suzuyoruz.
-      stream: FirebaseFirestore.instance
-          .collection("encounters")
-          .orderBy("createdAt", descending: true)
-          .limit(100)
-          .snapshots(),
+      // Firestore stream'i initState icinde sabitlenir; kart kaydirirken yeniden baglanmaz.
+      stream: encountersStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
@@ -7592,12 +7839,19 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
 
         if (cards.isEmpty) {
           return _EmptyEncounterSearch(
-            radiusSelector: buildRadiusSelector(currentPosition),
+            radiusSelector: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                buildDiscoverShortcuts(),
+                buildRadiusSelector(currentPosition),
+              ],
+            ),
           );
         }
 
         return Column(
           children: [
+            buildDiscoverShortcuts(),
             buildRadiusSelector(currentPosition),
             Expanded(child: buildSwipeDeck(cards)),
           ],

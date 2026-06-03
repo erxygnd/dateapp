@@ -147,6 +147,8 @@ service cloud.firestore {
         changedOnly([
           'lastMessage',
           'lastMessageAt',
+          'lastSenderId',
+          'unreadCounts',
           'blockedBy',
           'blockedAt',
           'participantNames',

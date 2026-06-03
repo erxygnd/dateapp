@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 enum AppThemeChoice {
   light,
@@ -183,6 +183,13 @@ ThemeData buildAppTheme([AppThemeChoice? choice]) {
 }
 
 Widget appLogo({double size = 72, Color? color}) {
+  final child = color == null
+      ? Image.asset("assets/images/app_icon.png", fit: BoxFit.cover)
+      : CustomPaint(
+          painter: _FildirIconPainter(avatarColor: color),
+          child: SizedBox.square(dimension: size),
+        );
+
   return Container(
     width: size,
     height: size,
@@ -198,12 +205,7 @@ Widget appLogo({double size = 72, Color? color}) {
       ],
     ),
     clipBehavior: Clip.antiAlias,
-    child: RepaintBoundary(
-      child: CustomPaint(
-        painter: _FildirIconPainter(avatarColor: color),
-        child: SizedBox.square(dimension: size),
-      ),
-    ),
+    child: RepaintBoundary(child: child),
   );
 }
 
