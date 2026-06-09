@@ -16,10 +16,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'app_config.dart';
 import 'app_theme.dart';
 import 'firebase_options.dart';
+import 'models/backend_social_models.dart';
 import 'models/encounter_post.dart';
 import 'models/local_profile_photo.dart';
 import 'models/premium_access.dart';
 import 'services/account_deletion_service.dart';
+import 'services/backend_auth_controller.dart';
+import 'services/backend_social_service.dart';
 import 'services/profile_service.dart';
 import 'utils/chat_utils.dart';
 import 'utils/location_rules.dart';
@@ -34,10 +37,44 @@ Future<void> main() async {
     await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
   }
 
+  if (enableBackendTestMode) {
+    await backendAuthController.initialize();
+  }
+
   runApp(const MyDatingApp());
 }
 
 String? loadedThemeUserId;
+
+const Duration currentLocationTimeout = Duration(seconds: 20);
+const Duration recentLocationMaxAge = Duration(minutes: 10);
+const Duration fallbackLocationMaxAge = Duration(hours: 2);
+const String locationUnavailableMessage =
+    "Konum alınamadı. Emülatörde Location bölümünden Ankara konumu gönderip tekrar dene.";
+
+Position debugAnkaraPosition() {
+  return Position(
+    latitude: 39.9334,
+    longitude: 32.8597,
+    timestamp: DateTime.now(),
+    accuracy: 100,
+    altitude: 0,
+    altitudeAccuracy: 0,
+    heading: 0,
+    headingAccuracy: 0,
+    speed: 0,
+    speedAccuracy: 0,
+    isMocked: true,
+  );
+}
+
+bool isLocationFreshEnough(Position position, Duration maxAge) {
+  final ageMs = DateTime.now()
+      .difference(position.timestamp)
+      .inMilliseconds
+      .abs();
+  return ageMs <= maxAge.inMilliseconds;
+}
 
 Future<void> loadSavedThemeForUser(User user) async {
   if (loadedThemeUserId == user.uid) {
@@ -284,6 +321,21 @@ class AuthGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (enableBackendTestMode) {
+      return AnimatedBuilder(
+        animation: backendAuthController,
+        builder: (context, _) {
+          if (!backendAuthController.initialized) {
+            return const LoadingPage();
+          }
+
+          return backendAuthController.isSignedIn
+              ? const WelcomePage()
+              : const LoginPage();
+        },
+      );
+    }
+
     return StreamBuilder<User?>(
       // FirebaseAuth burada uygulamanin kapicisi gibi calisir:
       // kullanici giris yaptiysa ana sayfa, yapmadiysa login ekrani acilir.
@@ -345,12 +397,32 @@ Future<Position> getCurrentPositionSafely() async {
     );
   }
 
-  return Geolocator.getCurrentPosition(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.medium,
-      timeLimit: Duration(seconds: 12),
-    ),
-  );
+  final lastKnownPosition = await Geolocator.getLastKnownPosition();
+
+  if (lastKnownPosition != null &&
+      isLocationFreshEnough(lastKnownPosition, recentLocationMaxAge)) {
+    return lastKnownPosition;
+  }
+
+  try {
+    return await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.low,
+        timeLimit: currentLocationTimeout,
+      ),
+    );
+  } on TimeoutException {
+    if (lastKnownPosition != null &&
+        isLocationFreshEnough(lastKnownPosition, fallbackLocationMaxAge)) {
+      return lastKnownPosition;
+    }
+
+    if (kDebugMode) {
+      return debugAnkaraPosition();
+    }
+
+    throw Exception(locationUnavailableMessage);
+  }
 }
 
 String friendlyAuthError(FirebaseAuthException e) {
@@ -1085,6 +1157,15 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final loginId = emailController.text.trim();
+
+      if (enableBackendTestMode) {
+        await backendAuthController.login(
+          login: loginId,
+          password: passwordController.text.trim(),
+        );
+        return;
+      }
+
       var email = loginId;
 
       if (!loginId.contains("@")) {
@@ -1415,8 +1496,36 @@ class _RegisterPageState extends State<RegisterPage> {
 
     try {
       final username = usernameController.text.trim();
-      final usernameLower = normalizeUsername(username);
       final phoneNumber = phoneController.text.trim();
+
+      if (enableBackendTestMode) {
+        final photoUrls = await prepareProfilePhotoSources(
+          photos: selectedPhotos,
+        );
+
+        await backendAuthController.register(
+          userName: username,
+          email: emailController.text.trim(),
+          password: passwordController.text.trim(),
+          displayName: displayNameController.text.trim(),
+          birthDate: selectedBirthDate!,
+          gender: selectedGender!,
+          bio: bioController.text.trim(),
+          phoneNumber: phoneNumber,
+          photoUrls: photoUrls,
+        );
+
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const AppTutorialPage()),
+            (route) => false,
+          );
+        }
+
+        return;
+      }
+
+      final usernameLower = normalizeUsername(username);
       final phoneDigits = onlyPhoneDigits(phoneNumber);
       final firestore = FirebaseFirestore.instance;
       final usernameRef = firestore.collection("usernames").doc(usernameLower);
@@ -1832,9 +1941,6 @@ class WelcomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final userName = user?.displayName ?? "Kullanıcı";
-
     return Scaffold(
       backgroundColor: Colors.transparent,
       bottomNavigationBar: PremiumBottomNav(
@@ -1849,32 +1955,6 @@ class WelcomePage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    appLogo(),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        "Fıldır",
-                        style: TextStyle(
-                          color: AppColors.text,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 26),
-                Text(
-                  "Merhaba, $userName",
-                  style: TextStyle(
-                    color: AppColors.secondary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 10),
                 Text(
                   "Şehrin içinde yarım kalan anları bul.",
                   style: TextStyle(
@@ -1884,16 +1964,7 @@ class WelcomePage extends StatelessWidget {
                     height: 1.05,
                   ),
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  "Yakınındaki itirafları gör, kendi karşılaşmanı bırak. Sohbet sadece iki taraf onay verirse açılır.",
-                  style: TextStyle(
-                    color: AppColors.softText,
-                    fontSize: 16,
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
                 GlassPanel(
                   radius: 28,
                   padding: EdgeInsets.zero,
@@ -2708,6 +2779,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
     appThemeController.value = choice;
 
+    if (enableBackendTestMode) {
+      return;
+    }
+
     if (user == null) {
       showMessage("Oturum bulunamadı.");
       return;
@@ -2869,6 +2944,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> deleteAccount() async {
+    if (enableBackendTestMode) {
+      showMessage("Test modunda hesap silme henuz backend'e baglanmadi.");
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -2979,7 +3059,11 @@ class _SettingsPageState extends State<SettingsPage> {
       isLoggingOut = true;
     });
 
-    await FirebaseAuth.instance.signOut();
+    if (enableBackendTestMode) {
+      await backendAuthController.logout();
+    } else {
+      await FirebaseAuth.instance.signOut();
+    }
     loadedThemeUserId = null;
 
     if (!mounted) {
@@ -3559,6 +3643,11 @@ class LegacyWelcomePage extends StatelessWidget {
   const LegacyWelcomePage({super.key});
 
   Future<void> logout() async {
+    if (enableBackendTestMode) {
+      await backendAuthController.logout();
+      return;
+    }
+
     await FirebaseAuth.instance.signOut();
   }
 
@@ -3803,6 +3892,10 @@ class _ProfilePageState extends State<ProfilePage> {
   final bioController = TextEditingController();
   final List<LocalProfilePhoto> newPhotos = [];
   final List<String> photoUrls = [];
+  DateTime? backendBirthDate;
+  String? backendGender;
+  String backendPhoneNumber = "";
+  String backendCity = "Ankara";
 
   bool isLoading = true;
   bool isSaving = false;
@@ -3851,6 +3944,41 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> loadProfile() async {
+    if (enableBackendTestMode) {
+      try {
+        final profile = await backendAuthController.fetchProfile();
+
+        if (!mounted) {
+          return;
+        }
+
+        backendBirthDate = profile.birthDate;
+        backendGender = profile.gender;
+        backendPhoneNumber = profile.phoneNumber ?? "";
+        backendCity = profile.city ?? "Ankara";
+        usernameController.text = profile.userName;
+        nameController.text = profile.displayName ?? profile.userName;
+        birthDateController.text = profile.birthDate == null
+            ? ""
+            : formatBirthDate(profile.birthDate!);
+        genderController.text = profile.gender ?? "";
+        bioController.text = profile.bio;
+        photoUrls
+          ..clear()
+          ..addAll(profile.photoUrls);
+      } catch (e) {
+        showMessage("Profil yuklenemedi: $e");
+      } finally {
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+          });
+        }
+      }
+
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -3888,6 +4016,73 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> saveProfile() async {
     if (!formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (enableBackendTestMode) {
+      final birthDate = backendBirthDate;
+      final gender = backendGender ?? genderController.text.trim();
+
+      if (birthDate == null) {
+        showMessage("Dogum tarihi bulunamadi.");
+        return;
+      }
+
+      if (gender.isEmpty) {
+        showMessage("Cinsiyet bulunamadi.");
+        return;
+      }
+
+      if (photoUrls.isEmpty && newPhotos.isEmpty) {
+        showMessage("En az 1 profil fotografi bulunmali.");
+        return;
+      }
+
+      setState(() {
+        isSaving = true;
+      });
+
+      try {
+        final uploadedUrls = await prepareProfilePhotoSources(
+          photos: newPhotos,
+        );
+        final updatedPhotoUrls = [...photoUrls, ...uploadedUrls];
+        final updatedProfile = await backendAuthController.updateProfile(
+          displayName: nameController.text.trim(),
+          birthDate: birthDate,
+          gender: gender,
+          bio: bioController.text.trim(),
+          phoneNumber: backendPhoneNumber,
+          city: backendCity,
+          photoUrls: updatedPhotoUrls,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        backendBirthDate = updatedProfile.birthDate;
+        backendGender = updatedProfile.gender;
+        backendPhoneNumber = updatedProfile.phoneNumber ?? "";
+        backendCity = updatedProfile.city ?? "Ankara";
+        photoUrls
+          ..clear()
+          ..addAll(updatedProfile.photoUrls);
+        newPhotos.clear();
+
+        showMessage("Profil guncellendi.");
+      } on TimeoutException {
+        showMessage("Profil kaydi cok uzun surdu. Backend'i kontrol et.");
+      } catch (e) {
+        showMessage("Profil guncellenirken hata olustu: $e");
+      } finally {
+        if (mounted) {
+          setState(() {
+            isSaving = false;
+          });
+        }
+      }
+
       return;
     }
 
@@ -3994,6 +4189,11 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> deleteAccount() async {
+    if (enableBackendTestMode) {
+      showMessage("Test modunda hesap silme henuz backend'e baglanmadi.");
+      return;
+    }
+
     // Hesap silme geri alinmaz. Bu yuzden once onay, sonra sifre istiyoruz.
     final confirmed = await showDialog<bool>(
       context: context,
@@ -4616,6 +4816,101 @@ class MyEncountersPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (enableBackendTestMode) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          foregroundColor: AppColors.text,
+          title: const Text("Ä°tiraflarÄ±m"),
+          actions: [
+            IconButton(
+              tooltip: "Yeni itiraf",
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CreateEncounterPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.add),
+            ),
+          ],
+        ),
+        body: AppBackdrop(
+          child: SafeArea(
+            child: FutureBuilder<List<EncounterPost>>(
+              future: backendSocialService.myEncounters(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Center(
+                    child: CircularProgressIndicator(color: AppColors.accent),
+                  );
+                }
+
+                if (snapshot.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: Text(
+                        "Ä°tiraflarÄ±n yÃ¼klenirken hata oluÅŸtu:\n${snapshot.error}",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppColors.softText,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  );
+                }
+
+                final posts = snapshot.data ?? const <EncounterPost>[];
+
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                  itemCount: posts.isEmpty ? 2 : posts.length + 2,
+                  separatorBuilder: (_, _) => const SizedBox(height: 14),
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return buildHeader(context, posts.length);
+                    }
+
+                    if (posts.isEmpty) {
+                      return buildEmptyState(context);
+                    }
+
+                    if (index == 1) {
+                      return Row(
+                        children: [
+                          Text(
+                            "Son paylaÅŸÄ±mlar",
+                            style: TextStyle(
+                              color: AppColors.text,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const Spacer(),
+                          buildChip(
+                            icon: Icons.lock_outline,
+                            label: "Gizli takip",
+                            color: const Color(0xFFF5B5CE),
+                          ),
+                        ],
+                      );
+                    }
+
+                    return buildEncounterCard(context, posts[index - 2]);
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      );
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
@@ -4996,8 +5291,253 @@ class IncomingRequestsPage extends StatelessWidget {
     );
   }
 
+  Future<void> decideBackendRequest({
+    required BuildContext context,
+    required BackendEncounterRequest request,
+    required bool accepted,
+  }) async {
+    try {
+      final updated = accepted
+          ? await backendSocialService.acceptRequest(request.id)
+          : await backendSocialService.rejectRequest(request.id);
+
+      if (!context.mounted) {
+        return;
+      }
+
+      if (!accepted) {
+        showMessage(context, "Istek reddedildi.");
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const IncomingRequestsPage()),
+        );
+        return;
+      }
+
+      final chatId = updated.chatId;
+
+      if (chatId == null || chatId.isEmpty) {
+        showMessage(context, "Sohbet acilamadi. Tekrar dene.");
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatPage(
+            chatId: chatId,
+            otherUserId: updated.requesterId,
+            otherUserName: updated.requesterName,
+          ),
+        ),
+      );
+    } catch (e) {
+      showMessage(context, "Istek guncellenemedi: $e");
+    }
+  }
+
+  Widget buildBackendRequestCard(
+    BuildContext context,
+    BackendEncounterRequest request,
+  ) {
+    final name = request.requesterName;
+    final bio = request.requesterBio.trim().isEmpty
+        ? "Biografi henuz eklenmemis."
+        : request.requesterBio;
+
+    return Dismissible(
+      key: ValueKey("backend_request_${request.id}"),
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 24),
+        color: Colors.green.withValues(alpha: 0.35),
+        child: const Icon(Icons.check, color: Colors.white, size: 34),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        color: Colors.redAccent.withValues(alpha: 0.35),
+        child: const Icon(Icons.close, color: Colors.white, size: 34),
+      ),
+      confirmDismiss: (direction) async {
+        await decideBackendRequest(
+          context: context,
+          request: request,
+          accepted: direction == DismissDirection.startToEnd,
+        );
+        return false;
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: AppColors.accent,
+                  foregroundColor: Colors.white,
+                  child: const Icon(Icons.person),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    request.requesterAge == null
+                        ? name
+                        : "$name, ${request.requesterAge}",
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              bio,
+              style: TextStyle(
+                color: AppColors.softText,
+                fontSize: 15,
+                height: 1.45,
+              ),
+            ),
+            if (request.message.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                '"${request.message}"',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 14,
+                  height: 1.4,
+                  fontStyle: FontStyle.italic,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Text(
+              "Ilgilendigi itiraf: ${request.postPlace.isEmpty ? "Karsilasma" : request.postPlace}",
+              style: TextStyle(
+                color: AppColors.accent,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => decideBackendRequest(
+                      context: context,
+                      request: request,
+                      accepted: false,
+                    ),
+                    icon: const Icon(Icons.close),
+                    label: const Text("Sola"),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.redAccent,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => decideBackendRequest(
+                      context: context,
+                      request: request,
+                      accepted: true,
+                    ),
+                    icon: const Icon(Icons.check),
+                    label: const Text("Saga"),
+                    style: mainButtonStyle(),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (enableBackendTestMode) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: AppColors.background,
+          foregroundColor: AppColors.text,
+          title: const Text("Gelen Ä°stekler"),
+        ),
+        body: FutureBuilder<List<BackendEncounterRequest>>(
+          future: backendSocialService.incomingRequests(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(
+                child: CircularProgressIndicator(color: AppColors.accent),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    "Istekler yuklenemedi:\n${snapshot.error}",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.softText),
+                  ),
+                ),
+              );
+            }
+
+            final requests = snapshot.data ?? const <BackendEncounterRequest>[];
+
+            if (requests.isEmpty) {
+              return ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  buildRequestGuide(),
+                  const SizedBox(height: 28),
+                  Text(
+                    "Henuz gelen istek yok.\nBirisi itirafini saga kaydirdiginda burada kart olarak gorunecek.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.softText,
+                      fontSize: 16,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return ListView.separated(
+              padding: const EdgeInsets.all(20),
+              itemCount: requests.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(height: 16),
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  return buildRequestGuide();
+                }
+
+                return buildBackendRequestCard(context, requests[index - 1]);
+              },
+            );
+          },
+        ),
+      );
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
@@ -5072,6 +5612,124 @@ class ChatListPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (enableBackendTestMode) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: AppColors.background,
+          foregroundColor: AppColors.text,
+          title: const Text("Sohbetler"),
+        ),
+        body: FutureBuilder<List<BackendChatSummary>>(
+          future: backendSocialService.chats(limit: chatListPageSize),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(
+                child: CircularProgressIndicator(color: AppColors.accent),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    "Sohbetler yuklenemedi:\n${snapshot.error}",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.softText),
+                  ),
+                ),
+              );
+            }
+
+            final chats = snapshot.data ?? const <BackendChatSummary>[];
+
+            if (chats.isEmpty) {
+              return Center(
+                child: Text(
+                  "HenÃ¼z sohbet yok.",
+                  style: TextStyle(color: AppColors.softText),
+                ),
+              );
+            }
+
+            return ListView.separated(
+              padding: const EdgeInsets.all(20),
+              itemCount: chats.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final chat = chats[index];
+
+                return ListTile(
+                  tileColor: AppColors.card,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  leading: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: AppColors.accent,
+                        foregroundColor: Colors.white,
+                        backgroundImage: null,
+                        child: const Icon(Icons.chat_bubble_outline),
+                      ),
+                      if (chat.unreadCount > 0)
+                        Positioned(
+                          right: -5,
+                          top: -5,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.accent,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: AppColors.background),
+                            ),
+                            child: Text(
+                              chat.unreadCount.toString(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  title: Text(
+                    chat.otherUserName,
+                    style: TextStyle(color: AppColors.text),
+                  ),
+                  subtitle: Text(
+                    chat.lastMessage,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppColors.softText),
+                  ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChatPage(
+                          chatId: chat.id,
+                          otherUserId: chat.otherUserId,
+                          otherUserName: chat.otherUserName,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
+      );
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
@@ -5276,10 +5934,18 @@ class _ChatPageState extends State<ChatPage> {
   bool isRecordingVoice = false;
   int recordingSeconds = 0;
   String? lastAutoReadMessageId;
+  Future<BackendChatDetail>? backendChatFuture;
+  Future<List<BackendChatMessage>>? backendMessagesFuture;
 
   @override
   void initState() {
     super.initState();
+    if (enableBackendTestMode) {
+      refreshBackendChat();
+      unawaited(backendSocialService.markChatRead(widget.chatId));
+      return;
+    }
+
     chatRef = FirebaseFirestore.instance.collection("chats").doc(widget.chatId);
     messagesRef = chatRef.collection("messages");
     chatStream = chatRef.snapshots();
@@ -5288,6 +5954,14 @@ class _ChatPageState extends State<ChatPage> {
         .limit(chatMessagePageSize)
         .snapshots();
     unawaited(markChatRead());
+  }
+
+  void refreshBackendChat() {
+    backendChatFuture = backendSocialService.chatDetail(widget.chatId);
+    backendMessagesFuture = backendSocialService.chatMessages(
+      widget.chatId,
+      limit: chatMessagePageSize,
+    );
   }
 
   void startRecordingTimer() {
@@ -5354,6 +6028,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> markChatRead() async {
+    if (enableBackendTestMode) {
+      await backendSocialService.markChatRead(widget.chatId).catchError((_) {});
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -5388,6 +6067,43 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> sendMessage(Map<String, dynamic> chatData) async {
+    if (enableBackendTestMode) {
+      final text = messageController.text.trim();
+
+      if (text.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        isSending = true;
+      });
+
+      try {
+        await backendSocialService.sendChatMessage(
+          chatId: widget.chatId,
+          type: "Text",
+          content: text,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        messageController.clear();
+        setState(refreshBackendChat);
+      } catch (e) {
+        showMessage("Mesaj gonderilemedi: $e");
+      } finally {
+        if (mounted) {
+          setState(() {
+            isSending = false;
+          });
+        }
+      }
+
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
     final text = messageController.text.trim();
 
@@ -5436,6 +6152,51 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> sendPhotoMessage(Map<String, dynamic> chatData) async {
+    if (enableBackendTestMode) {
+      if (!canSendPhotos(chatData)) {
+        showMessage("Fotograf gondermek icin sayac bitmeli.");
+        return;
+      }
+
+      try {
+        final photo = await pickAndCropProfilePhoto(
+          context: context,
+          imagePicker: imagePicker,
+        );
+
+        if (photo == null || !mounted) {
+          return;
+        }
+
+        setState(() {
+          isSending = true;
+        });
+
+        final photoSources = await prepareProfilePhotoSources(photos: [photo]);
+        await backendSocialService.sendChatMessage(
+          chatId: widget.chatId,
+          type: "Photo",
+          content: photoSources.single,
+        );
+
+        if (mounted) {
+          setState(refreshBackendChat);
+        }
+      } on TimeoutException {
+        showMessage("Fotograf hazirlanirken cok uzun surdu. Tekrar dene.");
+      } catch (e) {
+        showMessage("Fotograf gonderilemedi: $e");
+      } finally {
+        if (mounted) {
+          setState(() {
+            isSending = false;
+          });
+        }
+      }
+
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -5526,6 +6287,61 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> stopVoiceRecording({bool sendAfterStop = true}) async {
+    if (enableBackendTestMode) {
+      final durationSeconds = recordingSeconds
+          .clamp(1, voiceRecordingMaxDuration.inSeconds)
+          .toInt();
+
+      try {
+        recordingTimer?.cancel();
+        recordingTimer = null;
+        final dataUrl = await appMediaChannel.invokeMethod<String>(
+          "stopVoiceRecording",
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          isRecordingVoice = false;
+          recordingSeconds = 0;
+        });
+
+        if (!sendAfterStop || dataUrl == null) {
+          return;
+        }
+
+        await backendSocialService.sendChatMessage(
+          chatId: widget.chatId,
+          type: "Voice",
+          content: dataUrl,
+          durationSeconds: durationSeconds,
+        );
+
+        if (mounted) {
+          setState(refreshBackendChat);
+        }
+      } on MissingPluginException {
+        showMessage("Ses kaydi bu cihazda desteklenmiyor.");
+      } on PlatformException catch (e) {
+        showMessage(e.message ?? "Ses kaydi gonderilemedi.");
+      } catch (e) {
+        showMessage("Ses kaydi gonderilemedi: $e");
+      } finally {
+        recordingTimer?.cancel();
+        recordingTimer = null;
+        if (mounted) {
+          setState(() {
+            isRecordingVoice = false;
+            recordingSeconds = 0;
+          });
+        }
+      }
+
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
     final durationSeconds = recordingSeconds
         .clamp(1, voiceRecordingMaxDuration.inSeconds)
@@ -5596,6 +6412,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> blockUser() async {
+    if (enableBackendTestMode) {
+      showMessage("Test modunda engelleme henuz backend'e baglanmadi.");
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -5627,6 +6448,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> reportUser() async {
+    if (enableBackendTestMode) {
+      showMessage("Test modunda raporlama henuz backend'e baglanmadi.");
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
     final reasonController = TextEditingController();
 
@@ -5920,6 +6746,138 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (enableBackendTestMode) {
+      return FutureBuilder<BackendChatDetail>(
+        future: backendChatFuture ??= backendSocialService.chatDetail(
+          widget.chatId,
+        ),
+        builder: (context, chatSnapshot) {
+          final detail = chatSnapshot.data;
+          final chatData = <String, dynamic>{
+            "blockedBy": detail?.isActive == false ? ["system"] : <String>[],
+            if (detail?.createdAt != null)
+              "createdAt": Timestamp.fromDate(detail!.createdAt!),
+          };
+
+          return Scaffold(
+            backgroundColor: AppColors.background,
+            appBar: AppBar(
+              backgroundColor: AppColors.background,
+              foregroundColor: AppColors.text,
+              title: Text(detail?.otherUserName ?? widget.otherUserName),
+              actions: [
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == "report") {
+                      reportUser();
+                    }
+
+                    if (value == "block") {
+                      blockUser();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: "report", child: Text("Raporla")),
+                    PopupMenuItem(value: "block", child: Text("Engelle")),
+                  ],
+                ),
+              ],
+            ),
+            body: chatSnapshot.connectionState == ConnectionState.waiting
+                ? Center(
+                    child: CircularProgressIndicator(color: AppColors.accent),
+                  )
+                : chatSnapshot.hasError
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        "Sohbet yuklenemedi:\n${chatSnapshot.error}",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.softText),
+                      ),
+                    ),
+                  )
+                : Column(
+                    children: [
+                      buildChatRulesBanner(),
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            buildChatLogoBackground(),
+                            FutureBuilder<List<BackendChatMessage>>(
+                              future: backendMessagesFuture ??=
+                                  backendSocialService.chatMessages(
+                                    widget.chatId,
+                                    limit: chatMessagePageSize,
+                                  ),
+                              builder: (context, messageSnapshot) {
+                                if (messageSnapshot.connectionState ==
+                                    ConnectionState.waiting) {
+                                  return Center(
+                                    child: CircularProgressIndicator(
+                                      color: AppColors.accent,
+                                    ),
+                                  );
+                                }
+
+                                if (messageSnapshot.hasError) {
+                                  return Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Text(
+                                        "Mesajlar yuklenemedi:\n${messageSnapshot.error}",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: AppColors.softText,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                final messages =
+                                    messageSnapshot.data ??
+                                    const <BackendChatMessage>[];
+
+                                if (messages.isEmpty) {
+                                  return Center(
+                                    child: Text(
+                                      "Henuz mesaj yok.",
+                                      style: TextStyle(
+                                        color: AppColors.softText,
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                return ListView.builder(
+                                  padding: const EdgeInsets.all(16),
+                                  reverse: true,
+                                  cacheExtent: 420,
+                                  itemCount: messages.length,
+                                  itemBuilder: (context, index) {
+                                    final message =
+                                        messages[messages.length - 1 - index];
+                                    return buildMessageBubble(
+                                      message.toBubbleData(),
+                                      message.isMine,
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      buildComposer(chatData),
+                    ],
+                  ),
+          );
+        },
+      );
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -6062,6 +7020,67 @@ class _CreateEncounterPageState extends State<CreateEncounterPage> {
       return;
     }
 
+    if (enableBackendTestMode) {
+      setState(() {
+        isSaving = true;
+      });
+
+      try {
+        final position = await getCurrentPositionSafely();
+
+        if (!isLocationInAnkara(
+          latitude: position.latitude,
+          longitude: position.longitude,
+        )) {
+          showMessage(
+            "Pilot bÃ¶lge ÅŸimdilik Ankara. Ankara dÄ±ÅŸÄ±ndan itiraf bÄ±rakÄ±lamÄ±yor.",
+          );
+          return;
+        }
+
+        await backendSocialService.createEncounter(
+          place: placeController.text.trim(),
+          dateTimeText: dateTimeController.text.trim(),
+          description: descriptionController.text.trim(),
+          note: noteController.text.trim(),
+          vehiclePlate: vehiclePlateController.text.trim(),
+          personAppearance: selectedPersonAppearance ?? "",
+          personTraits: personTraitsController.text.trim(),
+          isAnonymous: isAnonymous,
+          latitude: position.latitude,
+          longitude: position.longitude,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        showMessage("KarÅŸÄ±laÅŸma ilanÄ± oluÅŸturuldu.");
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const BrowseEncountersPage()),
+        );
+      } on TimeoutException {
+        showMessage(locationUnavailableMessage);
+      } catch (e) {
+        final message = e.toString().replaceAll("Exception: ", "");
+        showMessage(
+          message.contains("TimeoutException")
+              ? locationUnavailableMessage
+              : message,
+        );
+      } finally {
+        if (mounted) {
+          setState(() {
+            isSaving = false;
+          });
+        }
+      }
+
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -6130,8 +7149,15 @@ class _CreateEncounterPageState extends State<CreateEncounterPage> {
         context,
         MaterialPageRoute(builder: (_) => const BrowseEncountersPage()),
       );
+    } on TimeoutException {
+      showMessage(locationUnavailableMessage);
     } catch (e) {
-      showMessage(e.toString().replaceAll("Exception: ", ""));
+      final message = e.toString().replaceAll("Exception: ", "");
+      showMessage(
+        message.contains("TimeoutException")
+            ? locationUnavailableMessage
+            : message,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -6471,6 +7497,11 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   }
 
   Future<void> reportEncounterPost(EncounterPost post) async {
+    if (enableBackendTestMode) {
+      showMessage("Test modunda ilan raporlama henuz backend'e baglanmadi.");
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -6498,6 +7529,11 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   }
 
   Future<void> blockEncounterOwner(EncounterPost post) async {
+    if (enableBackendTestMode) {
+      showMessage("Test modunda engelleme henuz backend'e baglanmadi.");
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -6533,6 +7569,40 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   }
 
   Future<bool> sendInterest(EncounterPost post) async {
+    if (enableBackendTestMode) {
+      final currentUserId = backendAuthController.session?.userId;
+
+      if (currentUserId == null) {
+        showMessage("Once giris yapmalisin.");
+        return false;
+      }
+
+      if (post.ownerId == currentUserId) {
+        showMessage("Kendi ilanina istek gonderemezsin.");
+        return false;
+      }
+
+      try {
+        final request = await backendSocialService.sendEncounterRequest(
+          encounterId: post.id,
+          message: "Bu ben olabilirim.",
+        );
+
+        if (request.isAccepted) {
+          showMessage("Bu itiraf icin sohbet zaten acilmis.");
+          return true;
+        }
+
+        showMessage(
+          "Istek gonderildi. Ilan sahibi profilini saga kaydirirsa sohbet acilacak.",
+        );
+        return true;
+      } catch (e) {
+        showMessage("Istek gonderilirken hata olustu: $e");
+        return false;
+      }
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -6778,10 +7848,15 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
     List<EncounterWithDistance> nearbyPosts,
   ) {
     final user = FirebaseAuth.instance.currentUser;
+    final backendUserId = backendAuthController.session?.userId;
 
     return nearbyPosts
         .where((item) => !dismissedPostIds.contains(item.post.id))
         .where((item) => item.post.ownerId != user?.uid)
+        .where(
+          (item) =>
+              !enableBackendTestMode || item.post.ownerId != backendUserId,
+        )
         .take(swipeDeckLookaheadCount)
         .toList(growable: false);
   }
@@ -7442,6 +8517,33 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   }
 
   Widget buildInterestButton(EncounterPost post) {
+    if (enableBackendTestMode) {
+      final currentUserId = backendAuthController.session?.userId;
+
+      if (currentUserId != null && post.ownerId == currentUserId) {
+        return OutlinedButton.icon(
+          onPressed: null,
+          icon: const Icon(Icons.person_outline),
+          label: const Text("Kendi ilanÄ±n"),
+        );
+      }
+
+      return OutlinedButton.icon(
+        onPressed: () {
+          unawaited(sendInterest(post).then((_) {}));
+        },
+        icon: const Icon(Icons.visibility_outlined),
+        label: const Text("Bu ben olabilirim"),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.accent,
+          side: BorderSide(color: AppColors.accent.withValues(alpha: 0.5)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      );
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -7800,6 +8902,67 @@ class _BrowseEncountersPageState extends State<BrowseEncountersPage> {
   }
 
   Widget buildPostsList(Position currentPosition) {
+    if (enableBackendTestMode) {
+      final effectiveRadiusKm = effectiveRadiusKmForLocation(
+        requestedRadiusKm: radiusKm,
+        latitude: currentPosition.latitude,
+        longitude: currentPosition.longitude,
+      );
+
+      return FutureBuilder<List<EncounterWithDistance>>(
+        future: backendSocialService.nearbyEncounters(
+          latitude: currentPosition.latitude,
+          longitude: currentPosition.longitude,
+          radiusKm: effectiveRadiusKm,
+          limit: encounterFeedPageSize,
+        ),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting ||
+              isLoadingDismissedPosts) {
+            return Center(
+              child: CircularProgressIndicator(color: AppColors.accent),
+            );
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  "Ä°lanlar yÃ¼klenirken hata oluÅŸtu:\n${snapshot.error}",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.softText),
+                ),
+              ),
+            );
+          }
+
+          final nearbyPosts = snapshot.data ?? const <EncounterWithDistance>[];
+          final cards = availableSwipeItems(nearbyPosts);
+
+          if (cards.isEmpty) {
+            return _EmptyEncounterSearch(
+              radiusSelector: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  buildDiscoverShortcuts(),
+                  buildRadiusSelector(currentPosition),
+                ],
+              ),
+            );
+          }
+
+          return Column(
+            children: [
+              buildDiscoverShortcuts(),
+              buildRadiusSelector(currentPosition),
+              Expanded(child: buildSwipeDeck(cards)),
+            ],
+          );
+        },
+      );
+    }
+
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       // Firestore stream'i initState icinde sabitlenir; kart kaydirirken yeniden baglanmaz.
       stream: encountersStream,

@@ -16,6 +16,14 @@ const int swipeDeckLookaheadCount = 6;
 const int incomingRequestPageSize = 60;
 const int chatListPageSize = 50;
 const int chatMessagePageSize = 80;
+const bool enableBackendTestMode = bool.fromEnvironment(
+  "FILDIR_BACKEND_TEST_MODE",
+  defaultValue: false,
+);
+const String backendApiBaseUrl = String.fromEnvironment(
+  "FILDIR_API_BASE_URL",
+  defaultValue: "http://10.0.2.2:5170",
+);
 
 // Flutter'in Android/iOS tarafina "ses kaydi baslat/durdur" diye komut yolladigi kopru.
 const MethodChannel appMediaChannel = MethodChannel("tanisma_app/media");

@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Fildir.Api/Fildir.Api.csproj" />
+    <Project Path="src/Fildir.Domain/Fildir.Domain.csproj" />
+    <Project Path="src/Fildir.Infrastructure/Fildir.Infrastructure.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fildir-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fildir}
+      POSTGRES_USER: ${POSTGRES_USER:-fildir_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fildir_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - fildir_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fildir_app} -d ${POSTGRES_DB:-fildir}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: fildir-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - fildir_redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+volumes:
+  fildir_postgres_data:
+  fildir_redis_data:

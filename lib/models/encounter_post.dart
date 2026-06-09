@@ -71,6 +71,38 @@ class EncounterPost {
       createdAt: data["createdAt"] is Timestamp ? data["createdAt"] : null,
     );
   }
+
+  factory EncounterPost.fromBackend(Map<String, dynamic> json) {
+    return EncounterPost(
+      id: json["id"]?.toString() ?? "",
+      place: json["place"]?.toString() ?? "",
+      dateTimeText: json["dateTimeText"]?.toString() ?? "",
+      description: json["description"]?.toString() ?? "",
+      note: json["note"]?.toString() ?? "",
+      vehiclePlate: json["vehiclePlate"]?.toString() ?? "",
+      personAppearance: json["personAppearance"]?.toString() ?? "",
+      personTraits: json["personTraits"]?.toString() ?? "",
+      requestCount: json["requestCount"] is int
+          ? json["requestCount"]
+          : int.tryParse("${json["requestCount"]}") ?? 0,
+      ownerId: json["ownerId"]?.toString() ?? "",
+      ownerName: json["ownerName"]?.toString() ?? "Kullanici",
+      ownerAge: json["ownerAge"] is int
+          ? json["ownerAge"]
+          : int.tryParse("${json["ownerAge"]}"),
+      ownerPhotoUrls: json["ownerPhotoUrls"] is List
+          ? (json["ownerPhotoUrls"] as List)
+                .map((item) => item.toString())
+                .toList()
+          : const [],
+      isAnonymous: json["isAnonymous"] == true,
+      location: GeoPoint(
+        _doubleFrom(json["latitude"]),
+        _doubleFrom(json["longitude"]),
+      ),
+      createdAt: _timestampFrom(json["createdAt"]),
+    );
+  }
 }
 
 class EncounterWithDistance {
@@ -79,4 +111,21 @@ class EncounterWithDistance {
   final double distanceMeters;
 
   EncounterWithDistance({required this.post, required this.distanceMeters});
+}
+
+double _doubleFrom(dynamic value) {
+  if (value is num) {
+    return value.toDouble();
+  }
+
+  return double.tryParse(value?.toString() ?? "") ?? 0;
+}
+
+Timestamp? _timestampFrom(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+
+  final parsed = DateTime.tryParse(value.toString());
+  return parsed == null ? null : Timestamp.fromDate(parsed.toLocal());
 }

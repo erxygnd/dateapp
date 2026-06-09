@@ -1,0 +1,160 @@
+@Fildir.Api_HostAddress = http://localhost:5170
+
+GET {{Fildir.Api_HostAddress}}/api/health
+Accept: application/json
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/health/db
+Accept: application/json
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+  "userName": "eray_dev",
+  "email": "eray.dev@example.com",
+  "password": "Test12345",
+  "displayName": "Eray",
+  "birthDate": "2000-01-01",
+  "city": "Ankara"
+}
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "login": "eray_dev",
+  "password": "Test12345"
+}
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/profile/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+PUT {{Fildir.Api_HostAddress}}/api/profile/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "displayName": "Eray",
+  "birthDate": "2000-01-01",
+  "gender": "Erkek",
+  "bio": "Kısa profil metni.",
+  "phoneNumber": "+90 555 111 22 33",
+  "city": "Ankara",
+  "photoUrls": [
+    "data:image/png;base64,example"
+  ]
+}
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/encounters
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "place": "Ankara / Kizilay",
+  "dateTimeText": "Bugun 18:30 civari",
+  "description": "Mavi montlu, siyah cantaliydi.",
+  "note": "Goz goze geldik ama konusamadim.",
+  "vehiclePlate": "",
+  "personAppearance": "Kumral",
+  "personTraits": "Yesil canta",
+  "isAnonymous": false,
+  "latitude": 39.9334,
+  "longitude": 32.8597
+}
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/encounters?latitude=39.9334&longitude=32.8597&radiusKm=5&limit=40
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/encounters/mine
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/encounters/{{encounterId}}/requests
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "message": "Ben de oradaydim."
+}
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/encounter-requests/incoming?status=Pending
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/encounter-requests/outgoing
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/encounter-requests/{{requestId}}/accept
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/encounter-requests/{{requestId}}/reject
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/chats
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/chats/{{chatId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+GET {{Fildir.Api_HostAddress}}/api/chats/{{chatId}}/messages?limit=80
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/chats/{{chatId}}/messages
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "type": "Text",
+  "content": "Selam, ben de oradaydim.",
+  "durationSeconds": null
+}
+
+###
+
+POST {{Fildir.Api_HostAddress}}/api/chats/{{chatId}}/read
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###

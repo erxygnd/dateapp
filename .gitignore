@@ -48,3 +48,12 @@ app.*.map.json
 /android/key.properties
 /android/upload-keystore.jks
 /android/app/upload-keystore.jks
+
+# .NET backend
+**/bin/
+**/obj/
+
+# Local secrets
+.env
+*.env
+!*.env.example
